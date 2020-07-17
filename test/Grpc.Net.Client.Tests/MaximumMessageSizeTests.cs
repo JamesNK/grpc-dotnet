@@ -35,7 +35,7 @@ namespace Grpc.Net.Client.Tests
     {
         private async Task<HttpResponseMessage> HandleRequest(HttpRequestMessage request)
         {
-            var requestStream = await request.Content.ReadAsStreamAsync();
+            var requestStream = await request.Content!.ReadAsStreamAsync();
 
             var helloRequest = await StreamExtensions.ReadMessageAsync(
                 requestStream,

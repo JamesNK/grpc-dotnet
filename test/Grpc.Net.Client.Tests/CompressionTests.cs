@@ -50,7 +50,7 @@ namespace Grpc.Net.Client.Tests
             {
                 httpRequestMessage = request;
 
-                var requestStream = await request.Content.ReadAsStreamAsync();
+                var requestStream = await request.Content!.ReadAsStreamAsync();
 
                 helloRequest = await StreamExtensions.ReadMessageAsync(
                     requestStream,
@@ -100,7 +100,7 @@ namespace Grpc.Net.Client.Tests
             {
                 httpRequestMessage = request;
 
-                var requestData = await request.Content.ReadAsByteArrayAsync();
+                var requestData = await request.Content!.ReadAsByteArrayAsync();
                 isRequestNotCompressed = requestData[0] == 0;
 
                 helloRequest = await StreamExtensions.ReadMessageAsync(
@@ -168,7 +168,7 @@ namespace Grpc.Net.Client.Tests
             {
                 httpRequestMessage = request;
 
-                var requestStream = await request.Content.ReadAsStreamAsync();
+                var requestStream = await request.Content!.ReadAsStreamAsync();
 
                 helloRequest = await StreamExtensions.ReadMessageAsync(
                     requestStream,
@@ -215,7 +215,7 @@ namespace Grpc.Net.Client.Tests
             {
                 httpRequestMessage = request;
 
-                var requestStream = await request.Content.ReadAsStreamAsync();
+                var requestStream = await request.Content!.ReadAsStreamAsync();
 
                 helloRequest = await StreamExtensions.ReadMessageAsync(
                     requestStream,
@@ -265,7 +265,7 @@ namespace Grpc.Net.Client.Tests
             {
                 httpRequestMessage = request;
 
-                var requestData = await request.Content.ReadAsByteArrayAsync();
+                var requestData = await request.Content!.ReadAsByteArrayAsync();
                 var requestStream = new MemoryStream(requestData);
 
                 isRequestNotCompressed1 = requestData[0] == 0;

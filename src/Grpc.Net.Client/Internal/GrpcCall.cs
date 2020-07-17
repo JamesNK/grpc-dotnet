@@ -651,7 +651,7 @@ namespace Grpc.Net.Client.Internal
 
         private (bool diagnosticSourceEnabled, Activity? activity) InitializeCall(HttpRequestMessage request, TimeSpan? timeout)
         {
-            GrpcCallLog.StartingCall(Logger, Method.Type, request.RequestUri);
+            GrpcCallLog.StartingCall(Logger, Method.Type, request.RequestUri!);
             GrpcEventSource.Log.CallStart(Method.FullName);
 
             // Deadline will cancel the call CTS.
@@ -862,7 +862,7 @@ namespace Grpc.Net.Client.Internal
             return timeout;
         }
 
-        private void DeadlineExceededCallback(object state)
+        private void DeadlineExceededCallback(object? state)
         {
             // Deadline is only exceeded if the timeout has passed and
             // the response has not been finished or canceled

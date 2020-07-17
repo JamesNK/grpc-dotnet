@@ -670,7 +670,7 @@ namespace Grpc.AspNetCore.Server.Tests
                 context.Initialize();
 
                 // Assert
-                Assert.AreEqual("/Package.Service/Method", Activity.Current.Tags.Single(t => t.Key == GrpcServerConstants.ActivityMethodTag).Value);
+                Assert.AreEqual("/Package.Service/Method", Activity.Current!.Tags.Single(t => t.Key == GrpcServerConstants.ActivityMethodTag).Value);
             }
         }
 
@@ -691,7 +691,7 @@ namespace Grpc.AspNetCore.Server.Tests
                 }
 
                 // Assert
-                Assert.AreEqual("/Package.Service/Method", Activity.Current.Tags.Single(t => t.Key == GrpcServerConstants.ActivityMethodTag).Value);
+                Assert.AreEqual("/Package.Service/Method", Activity.Current?.Tags.Single(t => t.Key == GrpcServerConstants.ActivityMethodTag).Value);
             }
         }
 
@@ -710,7 +710,7 @@ namespace Grpc.AspNetCore.Server.Tests
                 await context.EndCallAsync();
 
                 // Assert
-                Assert.AreEqual("8", Activity.Current.Tags.Single(t => t.Key == GrpcServerConstants.ActivityStatusCodeTag).Value);
+                Assert.AreEqual("8", Activity.Current!.Tags.Single(t => t.Key == GrpcServerConstants.ActivityStatusCodeTag).Value);
             }
         }
 
@@ -729,7 +729,7 @@ namespace Grpc.AspNetCore.Server.Tests
                 await context.ProcessHandlerErrorAsync(new Exception(), "MethodName");
 
                 // Assert
-                Assert.AreEqual("2", Activity.Current.Tags.Single(t => t.Key == GrpcServerConstants.ActivityStatusCodeTag).Value);
+                Assert.AreEqual("2", Activity.Current!.Tags.Single(t => t.Key == GrpcServerConstants.ActivityStatusCodeTag).Value);
             }
         }
 

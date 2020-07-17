@@ -310,14 +310,14 @@ namespace Grpc.AspNetCore.FunctionalTests.Client
 
             var client = new StreamService.StreamServiceClient(Channel);
 
-            await TestHelpers.RunParallel(tasks, async () =>
+            await TestHelpers.RunParallel(tasks, async taskIndex =>
             {
-                var (sent, received) = await EchoData(total, data, client);
+                var (sent, received) = await EchoData(total, data, client).DefaultTimeout();
 
                 // Assert
                 Assert.AreEqual(sent, total);
                 Assert.AreEqual(received, total);
-            });
+            }).DefaultTimeout();
         }
 
         [Test]
@@ -354,7 +354,7 @@ namespace Grpc.AspNetCore.FunctionalTests.Client
             var httpClient = Fixture.CreateClient();
             httpClient.Timeout = TimeSpan.FromSeconds(0.5);
 
-            var channel = GrpcChannel.ForAddress(httpClient.BaseAddress, new GrpcChannelOptions
+            var channel = GrpcChannel.ForAddress(httpClient.BaseAddress!, new GrpcChannelOptions
             {
                 HttpClient = httpClient,
                 LoggerFactory = LoggerFactory
@@ -490,7 +490,7 @@ namespace Grpc.AspNetCore.FunctionalTests.Client
             var call = client.ServerStreamingCall(new DataMessage());
 
             // Assert
-            var headers = await call.ResponseHeadersAsync;
+            var headers = await call.ResponseHeadersAsync.DefaultTimeout();
             var keyHeaders = headers.GetAll("key").ToList();
             Assert.AreEqual("key", keyHeaders[0].Key);
             Assert.AreEqual("Value1", keyHeaders[0].Value);

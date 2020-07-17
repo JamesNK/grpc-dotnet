@@ -69,7 +69,7 @@ namespace Grpc.Net.Client.Tests
             Assert.AreEqual(new Version(2, 0), httpRequestMessage!.Version);
             Assert.AreEqual(HttpMethod.Post, httpRequestMessage.Method);
             Assert.AreEqual(new Uri("https://localhost/ServiceName/MethodName"), httpRequestMessage.RequestUri);
-            Assert.AreEqual(new MediaTypeHeaderValue("application/grpc"), httpRequestMessage.Content.Headers.ContentType);
+            Assert.AreEqual(new MediaTypeHeaderValue("application/grpc"), httpRequestMessage.Content?.Headers?.ContentType);
         }
 
         [Test]
@@ -80,7 +80,7 @@ namespace Grpc.Net.Client.Tests
 
             var httpClient = ClientTestHelpers.CreateTestClient(async request =>
             {
-                content = (PushStreamContent<HelloRequest, HelloReply>)request.Content;
+                content = (PushStreamContent<HelloRequest, HelloReply>)request.Content!;
                 await content.PushComplete.DefaultTimeout();
 
                 HelloReply reply = new HelloReply

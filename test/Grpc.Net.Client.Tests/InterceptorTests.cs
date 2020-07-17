@@ -122,7 +122,7 @@ namespace Grpc.Net.Client.Tests
 
             var httpClient = ClientTestHelpers.CreateTestClient(async request =>
             {
-                var requestContent = await request.Content.ReadAsStreamAsync();
+                var requestContent = await request.Content!.ReadAsStreamAsync();
                 await requestContent.CopyToAsync(new MemoryStream());
 
                 var streamContent = await ClientTestHelpers.CreateResponseContent(new HelloReply { Message = "PASS" }).DefaultTimeout();

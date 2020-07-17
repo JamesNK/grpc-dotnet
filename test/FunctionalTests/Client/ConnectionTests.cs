@@ -36,7 +36,7 @@ namespace Grpc.AspNetCore.FunctionalTests.Client
             // Arrange
             var httpClient = Fixture.CreateClient(TestServerEndpointName.Http1WithTls);
 
-            var channel = GrpcChannel.ForAddress(httpClient.BaseAddress, new GrpcChannelOptions
+            var channel = GrpcChannel.ForAddress(httpClient.BaseAddress!, new GrpcChannelOptions
             {
                 LoggerFactory = LoggerFactory,
                 HttpClient = httpClient

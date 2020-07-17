@@ -19,6 +19,9 @@
     <EmbedUntrackedSources>true</EmbedUntrackedSources>
     <LangVersion>8.0</LangVersion>
     <Nullable>enable</Nullable>
+
+    <!-- Fix CS1900 error in .NET 5 preview -->
+    <AnalysisLevel>4</AnalysisLevel>
   </PropertyGroup>
 
 </Project>

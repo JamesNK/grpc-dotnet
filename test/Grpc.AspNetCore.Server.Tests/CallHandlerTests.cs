@@ -116,7 +116,7 @@ namespace Grpc.AspNetCore.Server.Tests
             // Assert
             var log = testSink.Writes.SingleOrDefault(w => w.EventId.Name == "UnsupportedRequestContentType");
             Assert.IsNotNull(log);
-            Assert.AreEqual("Request content-type of 'text/plain' is not supported.", log.Message);
+            Assert.AreEqual("Request content-type of 'text/plain' is not supported.", log!.Message);
         }
 
         [Test]
@@ -154,7 +154,7 @@ namespace Grpc.AspNetCore.Server.Tests
             // Assert
             var log = testSink.Writes.SingleOrDefault(w => w.EventId.Name == "UnsupportedRequestProtocol");
             Assert.IsNotNull(log);
-            Assert.AreEqual("Request protocol of 'HTTP/1.1' is not supported.", log.Message);
+            Assert.AreEqual("Request protocol of 'HTTP/1.1' is not supported.", log!.Message);
         }
 
         [Test]
