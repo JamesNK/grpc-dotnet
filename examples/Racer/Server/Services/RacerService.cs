@@ -21,12 +21,20 @@ using System.Diagnostics;
 using System.Linq;
 using System.Threading.Tasks;
 using Grpc.Core;
+using Microsoft.Extensions.Logging;
 using Race;
 
 namespace Server
 {
     public class RacerService : Racer.RacerBase
     {
+        private ILogger<RacerService> _logger;
+
+        public RacerService(ILoggerFactory loggerFactory)
+        {
+            _logger = loggerFactory.CreateLogger<RacerService>();
+        }
+
         public override async Task ReadySetGo(IAsyncStreamReader<RaceMessage> requestStream, IServerStreamWriter<RaceMessage> responseStream, ServerCallContext context)
         {
             var raceDuration = TimeSpan.Parse(context.RequestHeaders.Single(h => h.Key == "race-duration").Value);
@@ -35,21 +43,34 @@ namespace Server
             RaceMessage? lastMessageReceived = null;
             var readTask = Task.Run(async () =>
             {
+                _logger.LogInformation($"Started reading from client");
+
                 await foreach (var message in requestStream.ReadAllAsync())
                 {
                     lastMessageReceived = message;
                 }
+
+                _logger.LogInformation($"Finished reading from client");
             });
 
-            // Write outgoing messages until timer is complete
-            var sw = Stopwatch.StartNew();
-            var sent = 0;
-            while (sw.Elapsed < raceDuration)
+            for (int i = 0; i < 2; i++)
             {
-                await responseStream.WriteAsync(new RaceMessage { Count = ++sent });
+                _logger.LogInformation($"Iteration {i} - Start");
+
+                // Write outgoing messages until timer is complete
+                var sw = Stopwatch.StartNew();
+                var sent = 0;
+                while (sw.Elapsed < raceDuration)
+                {
+                    await responseStream.WriteAsync(new RaceMessage { Count = ++sent });
+                }
+
+                await readTask;
+
+                _logger.LogInformation($"Iteration {i} - Finish");
             }
 
-            await readTask;
+            _logger.LogInformation($"ReadySetGo finished");
         }
     }
 }

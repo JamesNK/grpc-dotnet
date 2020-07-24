@@ -27,7 +27,7 @@ namespace Client
 {
     class Program
     {
-        private static readonly TimeSpan RaceDuration = TimeSpan.FromSeconds(30);
+        private static readonly TimeSpan RaceDuration = TimeSpan.FromSeconds(10);
 
         static async Task Main(string[] args)
         {
@@ -60,6 +60,8 @@ namespace Client
                     {
                         lastMessageReceived = message;
                     }
+
+                    Console.WriteLine($"Finished reading from server");
                 });
 
                 // Write outgoing messages until timer is complete
@@ -71,7 +73,10 @@ namespace Client
                 }
 
                 // Finish call and report results
+                Console.WriteLine($"Completing request stream");
                 await call.RequestStream.CompleteAsync();
+
+                Console.WriteLine($"Waiting for response stream");
                 await readTask;
 
                 Console.WriteLine($"Messages sent: {sent}");
