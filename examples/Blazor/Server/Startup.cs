@@ -38,6 +38,13 @@ namespace Server
                 opts.MimeTypes = ResponseCompressionDefaults.MimeTypes.Concat(
                     new[] { "application/octet-stream" });
             });
+            services.AddCors(o => o.AddPolicy("AllowAll", builder =>
+            {
+                builder.AllowAnyOrigin()
+                       .AllowAnyMethod()
+                       .AllowAnyHeader()
+                       .WithExposedHeaders("Grpc-Status", "Grpc-Message", "Grpc-Encoding", "Grpc-Accept-Encoding");
+            }));
         }
 
         // This method gets called by the runtime. Use this method to configure the HTTP request pipeline.
@@ -55,13 +62,14 @@ namespace Server
             app.UseBlazorFrameworkFiles();
 
             app.UseRouting();
+            app.UseCors();
 
             app.UseGrpcWeb();
 
             app.UseEndpoints(endpoints =>
             {
-                endpoints.MapGrpcService<WeatherService>().EnableGrpcWeb();
-                endpoints.MapGrpcService<CounterService>().EnableGrpcWeb();
+                endpoints.MapGrpcService<WeatherService>().RequireCors("AllowAll").EnableGrpcWeb();
+                endpoints.MapGrpcService<CounterService>().RequireCors("AllowAll").EnableGrpcWeb();
                 endpoints.MapFallbackToFile("index.html");
             });
         }
