@@ -17,6 +17,7 @@
 #endregion
 
 using System;
+using System.Diagnostics;
 using System.IO;
 using System.Threading;
 using Microsoft.Extensions.Logging;
@@ -82,6 +83,10 @@ namespace Grpc.AspNetCore.FunctionalTests.Infrastructure
                     var logLine = timestamp + " " + _categoryName + " - " + logLevel + ": " + formatter(state, exception);
 
                     _writer.WriteLine(logLine);
+                    if (exception != null)
+                    {
+                        _writer.WriteLine(exception);
+                    }
                 }, null);
             }
         }

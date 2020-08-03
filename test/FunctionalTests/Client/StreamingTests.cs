@@ -17,6 +17,7 @@
 #endregion
 
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
@@ -524,5 +525,44 @@ namespace Grpc.AspNetCore.FunctionalTests.Client
             }
             return data;
         }
+
+#if NET5_0
+        [Test]
+        public async Task DuplexStreaming_MaxConcurrentStreams_AdditionalConnectionsCreated()
+        {
+            var streamCount = 250;
+            var count = 0;
+            var tcs = new TaskCompletionSource<object?>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            async Task WaitForAllStreams(IAsyncStreamReader<DataMessage> requestStream, IServerStreamWriter<DataMessage> responseStream, ServerCallContext context)
+            {
+                Interlocked.Increment(ref count);
+
+                if (count == streamCount)
+                {
+                    tcs.SetResult(null);
+                }
+
+                await tcs.Task;
+            }
+
+            // Arrange
+            var method = Fixture.DynamicGrpc.AddDuplexStreamingMethod<DataMessage, DataMessage>(WaitForAllStreams);
+
+            var channel = GrpcChannel.ForAddress(Fixture.GetUrl(TestServerEndpointName.Http2));
+
+            var client = TestClientFactory.Create(channel, method);
+
+            // Act
+            var calls = new List<AsyncDuplexStreamingCall<DataMessage, DataMessage>>();
+            for (var i = 0; i < streamCount; i++)
+            {
+                calls.Add(client.DuplexStreamingCall());
+            }
+
+            // Assert
+            await Task.WhenAll(calls.Select(c => c.ResponseHeadersAsync)).DefaultTimeout();
+        }
+#endif
     }
 }

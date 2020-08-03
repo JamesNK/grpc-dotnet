@@ -101,7 +101,10 @@ namespace Grpc.Net.Client
             if (handler == null)
             {
 #if NET5_0
-                handler = new SocketsHttpHandler();
+                handler = new SocketsHttpHandler
+                {
+                    EnableMultipleHttp2Connections = true
+                };
 #else
                 handler = new HttpClientHandler();
 #endif

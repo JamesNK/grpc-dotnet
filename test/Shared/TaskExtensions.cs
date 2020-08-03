@@ -47,10 +47,10 @@ namespace Grpc.Tests.Shared
         {
             // Don't create a timer if the task is already completed
             // or the debugger is attached
-            if (task.IsCompleted || Debugger.IsAttached)
-            {
-                return await task;
-            }
+            //if (task.IsCompleted || Debugger.IsAttached)
+            //{
+            //    return await task;
+            //}
 
             var cts = new CancellationTokenSource();
             if (task == await Task.WhenAny(task, Task.Delay(timeout, cts.Token)))
