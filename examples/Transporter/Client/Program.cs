@@ -54,7 +54,7 @@ namespace Client
             var connectionFactory = new UnixDomainSocketConnectionFactory(udsEndPoint);
             var socketsHttpHandler = new SocketsHttpHandler
             {
-                ConnectionFactory = connectionFactory
+                ConnectCallback = connectionFactory.ConnectAsync
             };
 
             return socketsHttpHandler;

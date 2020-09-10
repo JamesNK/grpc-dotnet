@@ -16,8 +16,10 @@
 
 #endregion
 
+using System;
+using System.IO;
 using System.Net;
-using System.Net.Connections;
+using System.Net.Http;
 using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
@@ -33,9 +35,68 @@ namespace Client
             _endPoint = endPoint;
         }
 
-        public override ValueTask<Connection> ConnectAsync(EndPoint? endPoint, IConnectionProperties? options = null, CancellationToken cancellationToken = default)
+        public ValueTask<Stream> ConnectAsync(SocketsHttpConnectionContext _, CancellationToken cancellationToken = default)
         {
-            return base.ConnectAsync(_endPoint, options, cancellationToken);
+            return ConnectAsync(_endPoint, cancellationToken);
+        }
+    }
+
+    public class SocketsConnectionFactory
+    {
+        private readonly AddressFamily _addressFamily;
+        private readonly SocketType _socketType;
+        private readonly ProtocolType _protocolType;
+
+        public SocketsConnectionFactory(
+            AddressFamily addressFamily,
+            SocketType socketType,
+            ProtocolType protocolType)
+        {
+            _addressFamily = addressFamily;
+            _socketType = socketType;
+            _protocolType = protocolType;
+        }
+
+        protected async ValueTask<Stream> ConnectAsync(
+            EndPoint endPoint,
+            CancellationToken cancellationToken = default)
+        {
+            if (endPoint == null) throw new ArgumentNullException(nameof(endPoint));
+            cancellationToken.ThrowIfCancellationRequested();
+
+            Socket socket = new Socket(_addressFamily, _socketType, _protocolType);
+
+            try
+            {
+                await socket.ConnectAsync(endPoint, cancellationToken).ConfigureAwait(false);
+                return new NetworkStream(socket, true);
+            }
+            catch
+            {
+                socket.Dispose();
+                throw;
+            }
+        }
+
+        protected virtual Socket CreateSocket(
+            AddressFamily addressFamily,
+            SocketType socketType,
+            ProtocolType protocolType,
+            EndPoint? endPoint)
+        {
+            Socket socket = new Socket(addressFamily, socketType, protocolType);
+
+            if (protocolType == ProtocolType.Tcp)
+            {
+                socket.NoDelay = true;
+            }
+
+            if (addressFamily == AddressFamily.InterNetworkV6)
+            {
+                socket.DualMode = true;
+            }
+
+            return socket;
         }
     }
 }
