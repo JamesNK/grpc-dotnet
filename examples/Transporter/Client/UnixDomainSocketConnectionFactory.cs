@@ -77,26 +77,5 @@ namespace Client
                 throw;
             }
         }
-
-        protected virtual Socket CreateSocket(
-            AddressFamily addressFamily,
-            SocketType socketType,
-            ProtocolType protocolType,
-            EndPoint? endPoint)
-        {
-            Socket socket = new Socket(addressFamily, socketType, protocolType);
-
-            if (protocolType == ProtocolType.Tcp)
-            {
-                socket.NoDelay = true;
-            }
-
-            if (addressFamily == AddressFamily.InterNetworkV6)
-            {
-                socket.DualMode = true;
-            }
-
-            return socket;
-        }
     }
 }
