@@ -219,5 +219,43 @@ namespace Grpc.AspNetCore.FunctionalTests.Server
 
             AssertHasLogRpcConnectionError(StatusCode.InvalidArgument, "Validation failed");
         }
+
+        [Test]
+        public async Task GetTrailers_ErrorWithNoBody_TrailersAvailableInClient()
+        {
+            Task<HelloReply> ThrowErrorWithoutBody(HelloRequest request, ServerCallContext context)
+            {
+                context.ResponseTrailers.Add("Response-Trailers", "value!");
+
+                var trailers = new Metadata();
+                trailers.Add(new Metadata.Entry("Rpc-Exception", "value!"));
+                throw new RpcException(new Status(StatusCode.InvalidArgument, "Validation failed"), trailers);
+            }
+
+            var method = Fixture.DynamicGrpc.AddUnaryMethod<HelloRequest, HelloReply>(ThrowErrorWithoutBody);
+
+            var channel = CreateChannel();
+
+            var client = TestClientFactory.Create(channel, method);
+
+            // Act
+            var call = client.UnaryCall(new HelloRequest());
+
+            var ex = await ExceptionAssert.ThrowsAsync<RpcException>(() => call.ResponseAsync).DefaultTimeout();
+
+            // Assert
+            var trailers = call.GetTrailers();
+            Assert.GreaterOrEqual(trailers.Count, 2);
+            Assert.AreEqual("value!", trailers.GetValue("rpc-exception"));
+            Assert.AreEqual("value!", trailers.GetValue("response-trailers"));
+
+            Assert.AreEqual(StatusCode.InvalidArgument, ex.StatusCode);
+            Assert.AreEqual("Validation failed", ex.Status.Detail);
+            Assert.GreaterOrEqual(ex.Trailers.Count, 1);
+            Assert.AreEqual("value!", trailers.GetValue("rpc-exception"));
+            Assert.AreEqual("value!", trailers.GetValue("response-trailers"));
+
+            AssertHasLogRpcConnectionError(StatusCode.InvalidArgument, "Validation failed");
+        }
     }
 }
