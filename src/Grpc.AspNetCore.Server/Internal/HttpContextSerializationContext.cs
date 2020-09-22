@@ -202,7 +202,13 @@ namespace Grpc.AspNetCore.Server.Internal
 
             if (_compressionProvider != null)
             {
+                var uncompressedLength = data.Length;
                 data = CompressMessage(data);
+                _serverCallContext.ActivityContext?.AddSentMessage(compressedSize: data.Length, uncompressedSize: uncompressedLength);
+            }
+            else
+            {
+                _serverCallContext.ActivityContext?.AddSentMessage(compressedSize: 0, uncompressedSize: data.Length);
             }
 
             WriteHeader(ResponseBufferWriter, data.Length, compress: _compressionProvider != null);

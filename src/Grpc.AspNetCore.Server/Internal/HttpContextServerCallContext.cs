@@ -41,6 +41,7 @@ namespace Grpc.AspNetCore.Server.Internal
         private AuthContext? _authContext;
         // Internal for tests
         internal ServerCallDeadlineManager? DeadlineManager;
+        internal ServerCallActivityContext? ActivityContext;
         private HttpContextSerializationContext? _serializationContext;
         private DefaultDeserializationContext? _deserializationContext;
 
@@ -275,10 +276,9 @@ namespace Grpc.AspNetCore.Server.Internal
 
         private void LogCallEnd()
         {
-            var activity = GetHostActivity();
-            if (activity != null)
+            if (ActivityContext != null)
             {
-                activity.AddTag(GrpcServerConstants.ActivityStatusCodeTag, _status.StatusCode.ToTrailerString());
+                ActivityContext.SetStatus(_status.StatusCode);
             }
             if (_status.StatusCode != StatusCode.OK)
             {
@@ -361,7 +361,8 @@ namespace Grpc.AspNetCore.Server.Internal
             var activity = GetHostActivity();
             if (activity != null)
             {
-                activity.AddTag(GrpcServerConstants.ActivityMethodTag, MethodCore);
+                ActivityContext = new ServerCallActivityContext(activity);
+                ActivityContext.SetMethod(MethodCore);
             }
 
             GrpcEventSource.Log.CallStart(MethodCore);

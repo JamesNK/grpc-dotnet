@@ -388,10 +388,12 @@ namespace Grpc.AspNetCore.Server.Internal
                 context.ValidateAcceptEncodingContainsResponseEncoding();
 
                 message = decompressedMessage;
+                context.ActivityContext?.AddReceivedMessage(compressedSize: messageLength, uncompressedSize: (int)decompressedMessage.GetValueOrDefault().Length);
             }
             else
             {
                 message = messageBuffer;
+                context.ActivityContext?.AddReceivedMessage(compressedSize: 0, uncompressedSize: messageLength);
             }
 
             // Update buffer to remove message
