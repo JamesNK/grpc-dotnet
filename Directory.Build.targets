@@ -27,4 +27,22 @@
     <PackageReference Include="Microsoft.SourceLink.GitHub" Version="$(MicrosoftSourceLinkGitHubPackageVersion)" PrivateAssets="All" />
   </ItemGroup>
 
+  <PropertyGroup>
+    <SkipLocalsInit Condition="'$(SkipLocalsInit)' == '' and '$(MSBuildProjectExtension)' == '.csproj'">true</SkipLocalsInit>
+  </PropertyGroup>
+
+  <!--Instructs compiler not to emit .locals init, using SkipLocalsInitAttribute.-->
+  <Choose>
+    <When Condition="'$(SkipLocalsInit)' == 'true'">
+      <PropertyGroup >
+        <!-- This is needed to use the SkipLocalsInitAttribute. -->
+        <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+      </PropertyGroup>
+
+      <ItemGroup>
+        <Compile Include="$(MSBuildThisFileDirectory)src\Shared\SkipLocalsInit.cs" Link="Shared\SkipLocalsInit.cs" />
+      </ItemGroup>
+    </When>
+  </Choose>
+
 </Project>

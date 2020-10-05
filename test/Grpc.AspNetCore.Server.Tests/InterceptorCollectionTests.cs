@@ -17,6 +17,7 @@
 #endregion
 
 using System;
+using System.Runtime.CompilerServices;
 using Grpc.AspNetCore.Server;
 using Grpc.Core.Interceptors;
 using NUnit.Framework;
@@ -26,6 +27,16 @@ namespace Grpc.AspNetCore.Server.Tests
     [TestFixture]
     public class InterceptorCollectionTests
     {
+        [Test]
+        public void stackalloc_test()
+        {
+            Span<int> s = stackalloc int[256];
+            for (int i = 0; i < s.Length; i++)
+            {
+                Console.WriteLine(s[i]);
+            }
+        }
+
         [Test]
         public void Add_NonGeneric_AddedToCollection()
         {
