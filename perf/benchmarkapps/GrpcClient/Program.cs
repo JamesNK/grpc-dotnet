@@ -37,6 +37,7 @@ using Google.Protobuf;
 using Grpc.Core;
 using Grpc.Net.Client;
 using Grpc.Testing;
+using Microsoft.Crank.EventSources;
 using Microsoft.Extensions.Logging;
 
 namespace GrpcClient
@@ -95,9 +96,9 @@ namespace GrpcClient
                 Log($"{nameof(GCSettings.IsServerGC)}: {isServerGC}");
                 Log($"{nameof(Environment.ProcessorCount)}: {processorCount}");
 
-                BenchmarksEventSource.Log.Metadata("NetCoreAppVersion", "first", "first", ".NET Runtime Version", ".NET Runtime Version", "");
-                BenchmarksEventSource.Log.Metadata("IsServerGC", "first", "first", "Server GC enabled", "Server GC is enabled", "");
-                BenchmarksEventSource.Log.Metadata("ProcessorCount", "first", "first", "Processor Count", "Processor Count", "n0");
+                BenchmarksEventSource.Register("NetCoreAppVersion", Operations.First, Operations.First, ".NET Runtime Version", ".NET Runtime Version", "");
+                BenchmarksEventSource.Register("IsServerGC", Operations.First, Operations.First, "Server GC enabled", "Server GC is enabled", "");
+                BenchmarksEventSource.Register("ProcessorCount", Operations.First, Operations.First, "Processor Count", "Processor Count", "n0");
 
                 BenchmarksEventSource.Measure("NetCoreAppVersion", runtimeVersion);
                 BenchmarksEventSource.Measure("IsServerGC", isServerGC.ToString());
