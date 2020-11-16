@@ -47,8 +47,9 @@ namespace Grpc.AspNetCore.Server.Tests
             Assert.AreEqual(true, options.EnableDetailedErrors);
             Assert.AreEqual(GrpcServiceOptionsSetup.DefaultReceiveMaxMessageSize, options.MaxReceiveMessageSize);
             Assert.AreEqual(1, options.MaxSendMessageSize);
-            Assert.AreEqual(1, options.CompressionProviders.Count);
+            Assert.AreEqual(2, options.CompressionProviders.Count);
             Assert.AreEqual("gzip", options.CompressionProviders[0].EncodingName);
+            Assert.AreEqual("deflate", options.CompressionProviders[1].EncodingName);
         }
 
         [Test]

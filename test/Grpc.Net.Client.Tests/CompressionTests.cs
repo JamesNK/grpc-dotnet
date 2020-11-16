@@ -146,7 +146,7 @@ namespace Grpc.Net.Client.Tests
             Assert.AreEqual("Hello world", response.Message);
 
             Debug.Assert(httpRequestMessage != null);
-            Assert.AreEqual("identity,gzip,test", httpRequestMessage.Headers.GetValues(GrpcProtocolConstants.MessageAcceptEncodingHeader).Single());
+            Assert.AreEqual("identity,gzip,deflate,test", httpRequestMessage.Headers.GetValues(GrpcProtocolConstants.MessageAcceptEncodingHeader).Single());
             Assert.AreEqual("gzip", httpRequestMessage.Headers.GetValues(GrpcProtocolConstants.MessageEncodingHeader).Single());
             Assert.AreEqual(false, httpRequestMessage.Headers.Contains(GrpcProtocolConstants.CompressionRequestAlgorithmHeader));
 
@@ -245,7 +245,7 @@ namespace Grpc.Net.Client.Tests
             // Assert
             var ex = await ExceptionAssert.ThrowsAsync<RpcException>(() => call.ResponseAsync).DefaultTimeout();
             Assert.AreEqual(StatusCode.Unimplemented, ex.StatusCode);
-            Assert.AreEqual("Unsupported grpc-encoding value 'not-supported'. Supported encodings: identity, gzip", ex.Status.Detail);
+            Assert.AreEqual("Unsupported grpc-encoding value 'not-supported'. Supported encodings: identity, gzip, deflate", ex.Status.Detail);
         }
 
         [Test]
@@ -325,7 +325,7 @@ namespace Grpc.Net.Client.Tests
             Assert.AreEqual("Hello world", response.Message);
 
             Debug.Assert(httpRequestMessage != null);
-            Assert.AreEqual("identity,gzip,test", httpRequestMessage.Headers.GetValues(GrpcProtocolConstants.MessageAcceptEncodingHeader).Single());
+            Assert.AreEqual("identity,gzip,deflate,test", httpRequestMessage.Headers.GetValues(GrpcProtocolConstants.MessageAcceptEncodingHeader).Single());
             Assert.AreEqual("gzip", httpRequestMessage.Headers.GetValues(GrpcProtocolConstants.MessageEncodingHeader).Single());
             Assert.AreEqual(false, httpRequestMessage.Headers.Contains(GrpcProtocolConstants.CompressionRequestAlgorithmHeader));
 
