@@ -23,6 +23,7 @@ using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 using Grpc.Core;
@@ -30,6 +31,10 @@ using Grpc.Net.Client.Internal;
 using Grpc.Net.Compression;
 using Grpc.Shared;
 using Microsoft.Extensions.Logging;
+
+#if NETSTANDARD2_0
+using ValueTask = System.Threading.Tasks.Task;
+#endif
 
 namespace Grpc.Net.Client
 {
@@ -43,7 +48,11 @@ namespace Grpc.Net.Client
             return new Status(StatusCode.Unimplemented, $"Unsupported grpc-encoding value '{unsupportedEncoding}'. Supported encodings: {string.Join(", ", supportedEncodings)}");
         }
 
+#if !NETSTANDARD2_0
         public static async ValueTask<TResponse?> ReadMessageAsync<TResponse>(
+#else
+        public static async Task<TResponse?> ReadMessageAsync<TResponse>(
+#endif
             this Stream responseStream,
             GrpcCall call,
             Func<DeserializationContext, TResponse> deserializer,
@@ -174,6 +183,34 @@ namespace Grpc.Net.Client
             }
         }
 
+#if NETSTANDARD2_0
+        public static Task<int> ReadAsync(this Stream stream, Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            if (MemoryMarshal.TryGetArray<byte>(buffer, out var segment))
+            {
+                return stream.ReadAsync(segment.Array, segment.Offset, segment.Count, cancellationToken);
+            }
+            else
+            {
+                var array = buffer.ToArray();
+                return stream.ReadAsync(array, 0, array.Length, cancellationToken);
+            }
+        }
+
+        public static Task WriteAsync(this Stream stream, ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            if (MemoryMarshal.TryGetArray<byte>(buffer, out var segment))
+            {
+                return stream.WriteAsync(segment.Array, segment.Offset, segment.Count, cancellationToken);
+            }
+            else
+            {
+                var array = buffer.ToArray();
+                return stream.WriteAsync(array, 0, array.Length, cancellationToken);
+            }
+        }
+#endif
+
         private static int ReadMessageLength(Span<byte> header)
         {
             var length = BinaryPrimitives.ReadUInt32BigEndian(header);
@@ -244,16 +281,13 @@ namespace Grpc.Net.Client
         }
 
         public static async ValueTask WriteMessageAsync<TMessage>(
-            this Stream stream,
+            this Stream stream, 
             GrpcCall call,
             TMessage message,
             Action<TMessage, SerializationContext> serializer,
-            CallOptions callOptions)
+            CallOptions callOptions,
+            GrpcCallSerializationContextBase serializationContext)
         {
-            var serializationContext = call.SerializationContext;
-            serializationContext.CallOptions = callOptions;
-            serializationContext.Initialize();
-
             try
             {
                 GrpcCallLog.SendingMessage(call.Logger);
@@ -275,10 +309,6 @@ namespace Grpc.Net.Client
             {
                 GrpcCallLog.ErrorSendingMessage(call.Logger, ex);
                 throw;
-            }
-            finally
-            {
-                serializationContext.Reset();
             }
         }
     }

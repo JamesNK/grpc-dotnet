@@ -28,7 +28,12 @@ using Grpc.Net.Compression;
 
 namespace Grpc.Net.Client.Internal
 {
-    internal sealed class GrpcCallSerializationContext : SerializationContext, IBufferWriter<byte>
+    internal abstract class GrpcCallSerializationContextBase : SerializationContext
+    {
+        public abstract bool TryGetPayload(out ReadOnlyMemory<byte> payload);
+    }
+
+    internal sealed class GrpcCallSerializationContext : GrpcCallSerializationContextBase, IBufferWriter<byte>
     {
         private static readonly Status SendingMessageExceedsLimitStatus = new Status(StatusCode.ResourceExhausted, "Sending message exceeds the maximum configured message size.");
 
@@ -86,7 +91,7 @@ namespace Grpc.Net.Client.Internal
         /// Obtains the payload from this operation, and returns a boolean indicating
         /// whether the serialization was complete; the state is reset either way.
         /// </summary>
-        public bool TryGetPayload(out ReadOnlyMemory<byte> payload)
+        public override bool TryGetPayload(out ReadOnlyMemory<byte> payload)
         {
             switch (_state)
             {
@@ -111,7 +116,7 @@ namespace Grpc.Net.Client.Internal
 
         private ICompressionProvider? ResolveCompressionProvider()
         {
-            Debug.Assert(
+            CompatibilityExtensions.Assert(
                 _call.RequestGrpcEncoding != null,
                 "Response encoding should have been calculated at this point.");
 
@@ -180,7 +185,7 @@ namespace Grpc.Net.Client.Internal
                     // When writing directly to the buffer the header with message size needs to be written first
                     if (DirectSerializationSupported)
                     {
-                        Debug.Assert(_payloadLength != null, "A payload length is required for direct serialization.");
+                        CompatibilityExtensions.Assert(_payloadLength != null, "A payload length is required for direct serialization.");
 
                         EnsureMessageSizeAllowed(_payloadLength.Value);
 
@@ -242,7 +247,7 @@ namespace Grpc.Net.Client.Internal
 
                     if (!DirectSerializationSupported)
                     {
-                        Debug.Assert(_bufferWriter != null, "Buffer writer has been set to get to this state.");
+                        CompatibilityExtensions.Assert(_bufferWriter != null, "Buffer writer has been set to get to this state.");
 
                         var data = _bufferWriter.WrittenSpan;
 
@@ -280,7 +285,7 @@ namespace Grpc.Net.Client.Internal
 
         private ReadOnlySpan<byte> CompressMessage(ReadOnlySpan<byte> messageData)
         {
-            Debug.Assert(_compressionProvider != null, "Compression provider is not null to get here.");
+            CompatibilityExtensions.Assert(_compressionProvider != null, "Compression provider is not null to get here.");
 
             GrpcCallLog.CompressingMessage(_call.Logger, _compressionProvider.EncodingName);
 
@@ -290,7 +295,12 @@ namespace Grpc.Net.Client.Internal
             // GZipStream writes final Adler32 at the end of the stream on dispose.
             using (var compressionStream = _compressionProvider.CreateCompressionStream(output, CompressionLevel.Fastest))
             {
+#if !NETSTANDARD2_0
                 compressionStream.Write(messageData);
+#else
+                var array = messageData.ToArray();
+                compressionStream.Write(array, 0, array.Length);
+#endif
             }
 
             return output.GetBuffer().AsSpan(0, (int)output.Length);
