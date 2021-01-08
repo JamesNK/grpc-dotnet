@@ -19,6 +19,8 @@
 using System;
 using System.Net.Http;
 using System.Security.Authentication;
+using System.Threading;
+using System.Threading.Tasks;
 using Grpc.Net.Client;
 using Grpc.Net.Client.Web;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
@@ -71,7 +73,13 @@ namespace Grpc.AspNetCore.FunctionalTests.Infrastructure
 
         private (HttpClient client, HttpMessageHandler handler) CreateHttpCore(TestServerEndpointName? endpointName = null, DelegatingHandler? messageHandler = null)
         {
-            endpointName ??= TestServerEndpointName.Http2;
+            endpointName ??= TestServerEndpointName.Http3WithTls;
+
+            if (endpointName == TestServerEndpointName.Http3WithTls)
+            {
+                // TODO(JamesNK): Switch required to be set before creating handler. Remove once .NET 6 is RTM.
+                AppContext.SetSwitch("System.Net.SocketsHttpHandler.Http3DraftSupport", isEnabled: true);
+            }
 
             var httpClientHandler = new HttpClientHandler();
             httpClientHandler.ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator;
@@ -82,18 +90,25 @@ namespace Grpc.AspNetCore.FunctionalTests.Infrastructure
             {
                 messageHandler.InnerHandler = httpClientHandler;
                 handler = messageHandler;
-                client = new HttpClient(messageHandler);
             }
             else
             {
                 handler = httpClientHandler;
-                client = new HttpClient(httpClientHandler);
             }
+
+            if (endpointName == TestServerEndpointName.Http3WithTls)
+            {
+                // TODO(JamesNK): There is a bug with SocketsHttpHandler and HTTP/3 that prevents calls
+                // upgrading from 2 to 3. Force HTTP/3 calls to require that protocol.
+                handler = new Http3DelegatingHandler(handler);
+            }
+
+            client = new HttpClient(handler);
 
             if (endpointName == TestServerEndpointName.Http2)
             {
                 client.DefaultRequestVersion = new Version(2, 0);
-#if NET5_0
+#if NET5_0_OR_GREATER
                 client.DefaultVersionPolicy = HttpVersionPolicy.RequestVersionOrHigher;
 #endif
             }
@@ -110,6 +125,7 @@ namespace Grpc.AspNetCore.FunctionalTests.Infrastructure
                 case TestServerEndpointName.Http2:
                 case TestServerEndpointName.Http1WithTls:
                 case TestServerEndpointName.Http2WithTls:
+                case TestServerEndpointName.Http3WithTls:
                     return new Uri(_server.GetUrl(endpointName.Value));
                 default:
                     throw new ArgumentException("Unexpected value: " + endpointName, nameof(endpointName));
@@ -126,6 +142,20 @@ namespace Grpc.AspNetCore.FunctionalTests.Infrastructure
         {
             Client.Dispose();
             _server.Dispose();
+        }
+
+        private class Http3DelegatingHandler : DelegatingHandler
+        {
+            public Http3DelegatingHandler(HttpMessageHandler innerHandler)
+            {
+                InnerHandler = innerHandler;
+            }
+
+            protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+            {
+                request.Version = new Version(3, 0);
+                return base.SendAsync(request, cancellationToken);
+            }
         }
     }
 }

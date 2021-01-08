@@ -19,10 +19,13 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Net;
+using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
+using Microsoft.AspNetCore.Server.Kestrel.Https;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -83,6 +86,14 @@ namespace Grpc.AspNetCore.FunctionalTests.Infrastructure
 
         public override void StartServer()
         {
+            var basePath = Path.GetDirectoryName(typeof(InProcessTestServer).Assembly.Location);
+            var certPath = Path.Combine(basePath!, "server1.pfx");
+            var cert = new X509Certificate2(certPath, "1111");
+
+            // If cert above is used then error is thrown by server:
+            // QuicException: Failed to open stream to peer. Error Code: INVALID_STATE
+            var certLocal = CertificateLoader.LoadFromStoreCert("localhost", StoreName.My.ToString(), StoreLocation.CurrentUser, false);
+
             _host = new WebHostBuilder()
                 .ConfigureLogging(builder => builder
                     .SetMinimumLevel(LogLevel.Trace)
@@ -92,11 +103,23 @@ namespace Grpc.AspNetCore.FunctionalTests.Infrastructure
                     _initialConfigureServices?.Invoke(services);
                 })
                 .UseStartup(typeof(TStartup))
+#if NET6_0
+                .UseQuic(options =>
+                {
+                    options.Certificate = certLocal;
+                    options.Alpn = "h3-29";
+                })
+#endif
                 .UseKestrel(options =>
                 {
+#if NET6_0
+                    options.EnableAltSvc = true;
+#endif
+
                     options.ListenLocalhost(50050, listenOptions =>
                     {
                         listenOptions.Protocols = HttpProtocols.Http2;
+                        listenOptions.UseConnectionLogging();
                     });
                     options.ListenLocalhost(50040, listenOptions =>
                     {
@@ -105,19 +128,21 @@ namespace Grpc.AspNetCore.FunctionalTests.Infrastructure
                     options.ListenLocalhost(50030, listenOptions =>
                     {
                         listenOptions.Protocols = HttpProtocols.Http2;
-
-                        var basePath = Path.GetDirectoryName(typeof(InProcessTestServer).Assembly.Location);
-                        var certPath = Path.Combine(basePath!, "server1.pfx");
-                        listenOptions.UseHttps(certPath, "1111");
+                        listenOptions.UseHttps(cert);
                     });
                     options.ListenLocalhost(50020, listenOptions =>
                     {
                         listenOptions.Protocols = HttpProtocols.Http1;
-
-                        var basePath = Path.GetDirectoryName(typeof(InProcessTestServer).Assembly.Location);
-                        var certPath = Path.Combine(basePath!, "server1.pfx");
-                        listenOptions.UseHttps(certPath, "1111");
+                        listenOptions.UseHttps(cert);
                     });
+#if NET6_0
+                    options.ListenLocalhost(50010, listenOptions =>
+                    {
+                        listenOptions.Protocols = HttpProtocols.Http1AndHttp2AndHttp3;
+                        listenOptions.UseConnectionLogging();
+                        listenOptions.UseHttps(certLocal);
+                    });
+#endif
                 })
                 .UseContentRoot(Directory.GetCurrentDirectory())
                 .Build();
@@ -143,10 +168,11 @@ namespace Grpc.AspNetCore.FunctionalTests.Infrastructure
             // Get the URL from the server
             _urls = new Dictionary<TestServerEndpointName, string>
             {
-                [TestServerEndpointName.Http2] = "http://127.0.0.1:50050",
-                [TestServerEndpointName.Http1] = "http://127.0.0.1:50040",
-                [TestServerEndpointName.Http2WithTls] = "https://127.0.0.1:50030",
-                [TestServerEndpointName.Http1WithTls] = "https://127.0.0.1:50020"
+                [TestServerEndpointName.Http2] = "http://localhost:50050",
+                [TestServerEndpointName.Http1] = "http://localhost:50040",
+                [TestServerEndpointName.Http2WithTls] = "https://localhost:50030",
+                [TestServerEndpointName.Http1WithTls] = "https://localhost:50020",
+                [TestServerEndpointName.Http3WithTls] = "https://localhost:50010"
             };
 
             _lifetime.ApplicationStopped.Register(() =>

@@ -102,6 +102,14 @@ namespace Grpc.AspNetCore.Server.Internal
 #endif
         }
 
+#if NET5_0
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        internal static bool IsHttp3(string protocol)
+        {
+            return HttpProtocol.IsHttp3(protocol);
+        }
+#endif
+
         internal static bool IsGrpcEncodingIdentity(string encoding)
         {
             return ReferenceEquals(encoding, IdentityGrpcEncoding) ||
