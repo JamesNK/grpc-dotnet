@@ -385,7 +385,7 @@ namespace GrpcClient
 
         private static ChannelBase CreateChannel(string target)
         {
-            var useTls = _options.Protocol == "h2";
+            var useTls = _options.Protocol == "h2" || _options.Protocol == "h3";
 
             switch (_options.GrpcClientType)
             {
@@ -407,6 +407,11 @@ namespace GrpcClient
 #if NETCOREAPP3_1
                     AppContext.SetSwitch("System.Net.Http.SocketsHttpHandler.Http2UnencryptedSupport", true);
 #endif
+#if NET6_0
+                    // TODO(JamesNK): Switch required to be set before creating handler. Remove once .NET 6 is RTM.
+                    AppContext.SetSwitch("System.Net.SocketsHttpHandler.Http3DraftSupport", isEnabled: true);
+#endif
+
                     var httpClientHandler = new SocketsHttpHandler();
                     httpClientHandler.UseProxy = false;
                     httpClientHandler.AllowAutoRedirect = false;
@@ -420,7 +425,7 @@ namespace GrpcClient
                             clientCertificate
                         };
                     }
-#if NET5_0 || NET6_0
+#if NET5_0_OR_GREATER
                     if (!string.IsNullOrEmpty(_options.UdsFileName))
                     {
                         var connectionFactory = new UnixDomainSocketConnectionFactory(new UnixDomainSocketEndPoint(ResolveUdsPath(_options.UdsFileName)));
@@ -431,12 +436,21 @@ namespace GrpcClient
                     httpClientHandler.SslOptions.RemoteCertificateValidationCallback =
                         (object sender, X509Certificate? certificate, X509Chain? chain, SslPolicyErrors sslPolicyErrors) => true;
 
+                    HttpMessageHandler httpMessageHandler = httpClientHandler;
+
+                    //Debugger.Launch();
+
+                    if (_options.Protocol == "h3")
+                    {
+                        httpMessageHandler = new Http3DelegatingHandler(httpMessageHandler);
+                    }
+
                     return GrpcChannel.ForAddress(address, new GrpcChannelOptions
                     {
-#if NET5_0 || NET6_0
-                        HttpHandler = httpClientHandler,
+#if NET5_0_OR_GREATER
+                        HttpHandler = httpMessageHandler,
 #else
-                        HttpClient = new HttpClient(httpClientHandler),
+                        HttpClient = new HttpClient(httpMessageHandler),
 #endif
                         LoggerFactory = _loggerFactory
                     });
@@ -673,6 +687,24 @@ namespace GrpcClient
             }
 
             return false;
+        }
+
+        private class Http3DelegatingHandler : DelegatingHandler
+        {
+            private static readonly Version Http3Version = new Version(3, 0);
+
+            public Http3DelegatingHandler(HttpMessageHandler innerHandler)
+            {
+                InnerHandler = innerHandler;
+            }
+
+            protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+            {
+                Console.WriteLine("Setting version to HTTP/3");
+
+                request.Version = Http3Version;
+                return base.SendAsync(request, cancellationToken);
+            }
         }
     }
 }

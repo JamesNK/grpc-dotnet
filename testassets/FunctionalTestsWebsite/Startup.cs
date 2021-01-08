@@ -150,6 +150,8 @@ namespace FunctionalTestsWebsite
 
                 endpoints.MapGet("/generateJwtToken", context =>
                 {
+                    context.Response.AppendTrailer("test", "value1");
+
                     return context.Response.WriteAsync(GenerateJwtToken());
                 });
             });

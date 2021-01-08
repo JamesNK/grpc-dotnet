@@ -31,9 +31,12 @@ namespace Grpc.AspNetCore.FunctionalTests.Web.Server
 {
     [TestFixture(GrpcTestMode.GrpcWeb, TestServerEndpointName.Http1)]
     [TestFixture(GrpcTestMode.GrpcWeb, TestServerEndpointName.Http2)]
+    [TestFixture(GrpcTestMode.GrpcWeb, TestServerEndpointName.Http3WithTls)]
     [TestFixture(GrpcTestMode.GrpcWebText, TestServerEndpointName.Http1)]
     [TestFixture(GrpcTestMode.GrpcWebText, TestServerEndpointName.Http2)]
+    [TestFixture(GrpcTestMode.GrpcWebText, TestServerEndpointName.Http3WithTls)]
     [TestFixture(GrpcTestMode.Grpc, TestServerEndpointName.Http2)]
+    [TestFixture(GrpcTestMode.Grpc, TestServerEndpointName.Http3WithTls)]
     public class UnaryMethodTests : GrpcWebFunctionalTestBase
     {
         public UnaryMethodTests(GrpcTestMode grpcTestMode, TestServerEndpointName endpointName)

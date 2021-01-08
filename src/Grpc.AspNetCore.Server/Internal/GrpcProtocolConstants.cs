@@ -70,7 +70,8 @@ namespace Grpc.AspNetCore.Server.Internal
 #endif
 
         internal const string IdentityGrpcEncoding = "identity";
-        internal const int ResetStreamNoError = 0;
+        internal const int Http2ResetStreamNoError = 0;
+        internal const int Http3ResetStreamNoError = 0x100;
 
         internal static readonly HashSet<string> FilteredHeaders = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
@@ -101,6 +102,14 @@ namespace Grpc.AspNetCore.Server.Internal
             return protocol == Http2Protocol || protocol == Http20Protocol;
 #endif
         }
+
+#if NET5_0
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        internal static bool IsHttp3(string protocol)
+        {
+            return HttpProtocol.IsHttp3(protocol);
+        }
+#endif
 
         internal static bool IsGrpcEncodingIdentity(string encoding)
         {

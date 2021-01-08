@@ -19,10 +19,12 @@
 using System;
 using System.IO;
 using System.Reflection;
+using System.Security.Cryptography.X509Certificates;
 using Common;
 using Microsoft.AspNetCore;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
+using Microsoft.AspNetCore.Server.Kestrel.Https;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -57,6 +59,16 @@ namespace GrpcAspNetCoreServer
                     webBuilder.UseContentRoot(Directory.GetCurrentDirectory());
                     webBuilder.UseConfiguration(config);
                     webBuilder.UseStartup<Startup>();
+
+#if NET6_0
+#pragma warning disable CA1416 // Validate platform compatibility
+                    webBuilder.UseQuic(options =>
+                    {
+                        options.IdleTimeout = TimeSpan.FromSeconds(60);
+                        options.Alpn = "h3-29";
+                    });
+#pragma warning restore CA1416 // Validate platform compatibility
+#endif
 
                     webBuilder.ConfigureKestrel((context, options) =>
                     {
@@ -102,7 +114,7 @@ namespace GrpcAspNetCoreServer
                         Console.WriteLine($"Console Logging enabled with level '{logLevel}'");
 
                         loggerFactory
-#if NET5_0 || NET6_0
+#if NET5_0_OR_GREATER
                             .AddSimpleConsole(o => o.TimestampFormat = "ss.ffff ")
 #else
                             .AddConsole(o => o.TimestampFormat = "ss.ffff ")
@@ -132,9 +144,7 @@ namespace GrpcAspNetCoreServer
             {
                 listenOptions.Protocols = HttpProtocols.Http1AndHttp2;
 
-                var basePath = Path.GetDirectoryName(typeof(Program).Assembly.Location);
-                var certPath = Path.Combine(basePath!, "Certs/testCert.pfx");
-                listenOptions.UseHttps(certPath, "testPassword", httpsOptions =>
+                listenOptions.UseHttps(GetCertificate(), httpsOptions =>
                 {
                     if (enableCertAuth)
                     {
@@ -143,6 +153,21 @@ namespace GrpcAspNetCoreServer
                     }
                 });
             }
+#if NET6_0
+            else if (protocol.Equals("h3", StringComparison.OrdinalIgnoreCase))
+            {
+                listenOptions.Protocols = HttpProtocols.Http3;
+
+                listenOptions.UseHttps(GetCertificate(), httpsOptions =>
+                {
+                    if (enableCertAuth)
+                    {
+                        httpsOptions.ClientCertificateMode = Microsoft.AspNetCore.Server.Kestrel.Https.ClientCertificateMode.AllowCertificate;
+                        httpsOptions.AllowAnyClientCertificate();
+                    }
+                });
+            }
+#endif
             else if (protocol.Equals("h2c", StringComparison.OrdinalIgnoreCase))
             {
                 listenOptions.Protocols = HttpProtocols.Http2;
@@ -155,6 +180,15 @@ namespace GrpcAspNetCoreServer
             {
                 throw new InvalidOperationException($"Unexpected protocol: {protocol}");
             }
+        }
+
+        private static X509Certificate2 GetCertificate()
+        {
+            var cert = CertificateLoader.LoadFromStoreCert("localhost", StoreName.My.ToString(), StoreLocation.CurrentUser, false);
+            return cert;
+            //var basePath = Path.GetDirectoryName(typeof(Program).Assembly.Location);
+            //var certPath = Path.Combine(basePath!, "Certs/testCert.pfx");
+            //return new X509Certificate2(certPath, "testPassword");
         }
     }
 }
