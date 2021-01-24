@@ -62,13 +62,9 @@ namespace Grpc.Net.Client.Internal.Http
             { 
                 // Serialize message first. Need to know size to prefix the length in the header
                 _call.Method.RequestMarshaller.ContextualSerializer(_content, serializationContext);
-                if (!serializationContext.TryGetPayload(out var data))
-                {
-                    throw new InvalidOperationException("Serialization did not return a payload.");
-                }
 
                 // Remove header. It will be written again with data to the request.
-                return data.ToArray();
+                return serializationContext.Memory.ToArray();
             }
             finally
             {
@@ -122,19 +118,17 @@ namespace Grpc.Net.Client.Internal.Http
             return true;
         }
 
-        private sealed class PayloadSerializationContext : GrpcCallSerializationContextBase
+        private sealed class PayloadSerializationContext : SerializationContext, IMemoryOwner<byte>
         {
-            private readonly Memory<byte> _payload;
-
             public PayloadSerializationContext(Memory<byte> payload)
             {
-                _payload = payload;
+                Memory = payload;
             }
 
-            public override bool TryGetPayload(out ReadOnlyMemory<byte> payload)
+            public Memory<byte> Memory { get; }
+
+            public void Dispose()
             {
-                payload = _payload;
-                return true;
             }
         }
     }

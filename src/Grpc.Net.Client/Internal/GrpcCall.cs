@@ -17,6 +17,7 @@
 #endregion
 
 using System;
+using System.Buffers;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.IO;
@@ -948,12 +949,12 @@ namespace Grpc.Net.Client.Internal
             }
         }
 
-        internal ValueTask WriteMessageAsync(
+        internal ValueTask WriteMessageAsync<TSerializationContext>(
             Stream stream,
             TRequest message,
             Action<TRequest, SerializationContext> contextualSerializer,
             CallOptions callOptions,
-            GrpcCallSerializationContextBase serializationContext)
+            TSerializationContext serializationContext) where TSerializationContext : SerializationContext, IMemoryOwner<byte>
         {
             return stream.WriteMessageAsync(
                 this,

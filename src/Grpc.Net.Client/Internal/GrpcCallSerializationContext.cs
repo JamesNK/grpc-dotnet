@@ -23,17 +23,13 @@ using System.Diagnostics;
 using System.IO;
 using System.IO.Compression;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using Grpc.Core;
 using Grpc.Net.Compression;
 
 namespace Grpc.Net.Client.Internal
 {
-    internal abstract class GrpcCallSerializationContextBase : SerializationContext
-    {
-        public abstract bool TryGetPayload(out ReadOnlyMemory<byte> payload);
-    }
-
-    internal sealed class GrpcCallSerializationContext : GrpcCallSerializationContextBase, IBufferWriter<byte>
+    internal sealed class GrpcCallSerializationContext : SerializationContext, IBufferWriter<byte>, IMemoryOwner<byte>
     {
         private static readonly Status SendingMessageExceedsLimitStatus = new Status(StatusCode.ResourceExhausted, "Sending message exceeds the maximum configured message size.");
 
@@ -88,30 +84,31 @@ namespace Grpc.Net.Client.Internal
         }
 
         /// <summary>
-        /// Obtains the payload from this operation, and returns a boolean indicating
-        /// whether the serialization was complete; the state is reset either way.
+        /// Obtains the payload from this operation. Error is thrown if complete hasn't been called.
         /// </summary>
-        public override bool TryGetPayload(out ReadOnlyMemory<byte> payload)
+        public Memory<byte> Memory
         {
-            switch (_state)
+            get
             {
-                case InternalState.CompleteArray:
-                case InternalState.CompleteBufferWriter:
-                    if (_buffer != null)
-                    {
-                        payload = _buffer.AsMemory(0, _bufferPosition);
-                        return true;
-                    }
-                    else if (_bufferWriter != null)
-                    {
-                        payload = _bufferWriter.WrittenMemory;
-                        return true;
-                    }
-                    break;
-            }
+                switch (_state)
+                {
+                    case InternalState.CompleteArray:
+                    case InternalState.CompleteBufferWriter:
+                        if (_buffer != null)
+                        {
+                            return _buffer.AsMemory(0, _bufferPosition);
+                        }
+                        else if (_bufferWriter != null)
+                        {
+                            var success = MemoryMarshal.TryGetArray(_bufferWriter.WrittenMemory, out var segment);
+                            Debug.Assert(success);
+                            return segment;
+                        }
+                        break;
+                }
 
-            payload = default;
-            return false;
+                throw new InvalidOperationException("Serialization did not return a payload.");
+            }
         }
 
         private ICompressionProvider? ResolveCompressionProvider()
@@ -326,6 +323,10 @@ namespace Grpc.Net.Client.Internal
         public Span<byte> GetSpan(int sizeHint = 0)
         {
             return _buffer != null ? _buffer.AsSpan(_bufferPosition) : _bufferWriter!.GetSpan(sizeHint);
+        }
+
+        public void Dispose()
+        {
         }
     }
 }
