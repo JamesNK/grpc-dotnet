@@ -3,7 +3,8 @@
     [bool]$use_tls = $false,
     [bool]$use_winhttp = $false,
     [string]$framework = "net5.0",
-    [string]$grpc_web_mode = "None"
+    [string]$grpc_web_mode = "None",
+    [int]$server_port = 50052
 )
 
 $allTests =
@@ -43,7 +44,7 @@ foreach ($test in $allTests)
 {
   Write-Host "Running $test" -ForegroundColor Cyan
 
-  dotnet run --framework $framework --use_tls $use_tls --server_host localhost --server_port 50052 --client_type httpclient --test_case $test --use_winhttp $use_winhttp --grpc_web_mode $grpc_web_mode
+  dotnet run --framework $framework --use_tls $use_tls --server_host localhost --server_port $server_port --client_type httpclient --test_case $test --use_winhttp $use_winhttp --grpc_web_mode $grpc_web_mode
 
   Write-Host
 }

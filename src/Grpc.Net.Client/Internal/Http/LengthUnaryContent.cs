@@ -18,7 +18,6 @@
 
 using Grpc.Core;
 using System;
-using System.Buffers;
 using System.IO;
 using System.Net;
 using System.Net.Http;
