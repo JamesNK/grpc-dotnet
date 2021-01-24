@@ -100,9 +100,10 @@ namespace Grpc.Net.Client.Internal
                         }
                         else if (_bufferWriter != null)
                         {
-                            var success = MemoryMarshal.TryGetArray(_bufferWriter.WrittenMemory, out var segment);
-                            Debug.Assert(success);
-                            return segment;
+                            // This is safe because:
+                            // 1. Underlying data source is an array.
+                            // 2. We're only reading anyway.
+                            return MemoryMarshal.AsMemory(_bufferWriter.WrittenMemory);
                         }
                         break;
                 }
