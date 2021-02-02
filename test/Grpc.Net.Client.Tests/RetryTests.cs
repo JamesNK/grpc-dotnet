@@ -18,19 +18,15 @@
 
 using System;
 using System.IO;
-using System.Linq;
 using System.Net;
 using System.Net.Http;
-using System.Net.Http.Headers;
 using System.Threading;
 using System.Threading.Tasks;
 using Greet;
 using Grpc.Core;
 using Grpc.Net.Client.Internal;
 using Grpc.Net.Client.Tests.Infrastructure;
-using Grpc.Shared;
 using Grpc.Tests.Shared;
-using Microsoft.Extensions.Logging.Abstractions;
 using NUnit.Framework;
 
 namespace Grpc.Net.Client.Tests
@@ -139,55 +135,76 @@ namespace Grpc.Net.Client.Tests
             Assert.AreEqual("Hello world", rs.Message);
         }
 
-        //        [Test]
-        //        public async Task AsyncUnaryCall_NonOkStatusTrailer_ThrowRpcError()
-        //        {
-        //            // Arrange
-        //            var httpClient = ClientTestHelpers.CreateTestClient(request =>
-        //            {
-        //                var response = ResponseUtils.CreateResponse(HttpStatusCode.OK, new ByteArrayContent(Array.Empty<byte>()), StatusCode.Unimplemented);
-        //                return Task.FromResult(response);
-        //            });
-        //            var invoker = HttpClientCallInvokerFactory.Create(httpClient);
+        [Test]
+        public async Task AsyncClientStreamingCall_Success_RequestContentSent()
+        {
+            // Arrange
+            PushStreamContent<HelloRequest, HelloReply>? content = null;
 
-        //            // Act
-        //            var ex = await ExceptionAssert.ThrowsAsync<RpcException>(() => invoker.AsyncUnaryCall<HelloRequest, HelloReply>(ClientTestHelpers.ServiceMethod, string.Empty, new CallOptions(), new HelloRequest()).ResponseAsync).DefaultTimeout();
+            var callCount = 0;
+            var httpClient = ClientTestHelpers.CreateTestClient(async request =>
+            {
+                content = (PushStreamContent<HelloRequest, HelloReply>)request.Content!;
+                await content.PushComplete.DefaultTimeout();
+                
+                callCount++;
+                if (callCount == 1)
+                {
+                    await content.CopyToAsync(new MemoryStream());
+                    return ResponseUtils.CreateResponse(HttpStatusCode.OK, new StringContent(""), StatusCode.Unavailable);
+                }
 
-        //            // Assert
-        //            Assert.AreEqual(StatusCode.Unimplemented, ex.StatusCode);
-        //        }
+                HelloReply reply = new HelloReply
+                {
+                    Message = "Hello world"
+                };
 
-        //        [Test]
-        //        public async Task AsyncUnaryCall_SuccessTrailersOnly_ThrowNoMessageError()
-        //        {
-        //            // Arrange
-        //            HttpResponseMessage? responseMessage = null;
-        //            var httpClient = ClientTestHelpers.CreateTestClient(request =>
-        //            {
-        //                responseMessage = ResponseUtils.CreateResponse(HttpStatusCode.OK, new ByteArrayContent(Array.Empty<byte>()), grpcStatusCode: null);
-        //                responseMessage.Headers.Add(GrpcProtocolConstants.StatusTrailer, StatusCode.OK.ToString("D"));
-        //                responseMessage.Headers.Add(GrpcProtocolConstants.MessageTrailer, "Detail!");
-        //                return Task.FromResult(responseMessage);
-        //            });
-        //            var invoker = HttpClientCallInvokerFactory.Create(httpClient);
+                var streamContent = await ClientTestHelpers.CreateResponseContent(reply).DefaultTimeout();
 
-        //            // Act
-        //            var call = invoker.AsyncUnaryCall<HelloRequest, HelloReply>(ClientTestHelpers.ServiceMethod, string.Empty, new CallOptions(), new HelloRequest());
-        //            var headers = await call.ResponseHeadersAsync.DefaultTimeout();
-        //            var ex = await ExceptionAssert.ThrowsAsync<RpcException>(() => call.ResponseAsync).DefaultTimeout();
+                return ResponseUtils.CreateResponse(HttpStatusCode.OK, streamContent);
+            });
+            var serviceConfig = CreateServiceConfig();
+            var invoker = HttpClientCallInvokerFactory.Create(httpClient, serviceConfig: serviceConfig);
 
-        //            // Assert
-        //            Assert.NotNull(responseMessage);
-        //            Assert.IsFalse(responseMessage!.TrailingHeaders.Any()); // sanity check that there are no trailers
+            // Act
+            var call = invoker.AsyncClientStreamingCall<HelloRequest, HelloReply>(ClientTestHelpers.GetServiceMethod(MethodType.ClientStreaming), string.Empty, new CallOptions());
 
-        //            Assert.AreEqual(StatusCode.Internal, ex.Status.StatusCode);
-        //            Assert.AreEqual("Failed to deserialize response message.", ex.Status.Detail);
+            // Assert
+            Assert.IsNotNull(call);
+            Assert.IsNotNull(content);
 
-        //            Assert.AreEqual(StatusCode.Internal, call.GetStatus().StatusCode);
-        //            Assert.AreEqual("Failed to deserialize response message.", call.GetStatus().Detail);
+            var responseTask = call.ResponseAsync;
+            Assert.IsFalse(responseTask.IsCompleted, "Response not returned until client stream is complete.");
 
-        //            Assert.AreEqual(0, headers.Count);
-        //            Assert.AreEqual(0, call.GetTrailers().Count);
-        //        }
+            var streamTask = content!.ReadAsStreamAsync().DefaultTimeout();
+
+            await call.RequestStream.WriteAsync(new HelloRequest { Name = "1" }).DefaultTimeout();
+            await call.RequestStream.WriteAsync(new HelloRequest { Name = "2" }).DefaultTimeout();
+
+            await call.RequestStream.CompleteAsync().DefaultTimeout();
+
+            var responseMessage = await responseTask.DefaultTimeout();
+            Assert.AreEqual("Hello world", responseMessage.Message);
+
+            var requestContent = await streamTask.DefaultTimeout();
+            var requestMessage = await StreamSerializationHelper.ReadMessageAsync(
+                requestContent,
+                ClientTestHelpers.ServiceMethod.RequestMarshaller.ContextualDeserializer,
+                GrpcProtocolConstants.IdentityGrpcEncoding,
+                maximumMessageSize: null,
+                GrpcProtocolConstants.DefaultCompressionProviders,
+                singleMessage: false,
+                CancellationToken.None).AsTask().DefaultTimeout();
+            Assert.AreEqual("1", requestMessage!.Name);
+            requestMessage = await StreamSerializationHelper.ReadMessageAsync(
+                requestContent,
+                ClientTestHelpers.ServiceMethod.RequestMarshaller.ContextualDeserializer,
+                GrpcProtocolConstants.IdentityGrpcEncoding,
+                maximumMessageSize: null,
+                GrpcProtocolConstants.DefaultCompressionProviders,
+                singleMessage: false,
+                CancellationToken.None).AsTask().DefaultTimeout();
+            Assert.AreEqual("2", requestMessage!.Name);
+        }
     }
 }

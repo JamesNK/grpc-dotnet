@@ -112,47 +112,57 @@ namespace Grpc.Net.Client.Internal
         IClientStreamWriter<TRequest>? IGrpcCall<TRequest, TResponse>.ClientStreamWriter => ClientStreamWriter;
         IAsyncStreamReader<TResponse>? IGrpcCall<TRequest, TResponse>.ClientStreamReader => ClientStreamReader;
 
-        public void StartRetry(List<ReadOnlyMemory<byte>> retryBuffer)
+        public void StartRetry(List<ReadOnlyMemory<byte>> retryBuffer, bool clientStreamCompleted)
         {
             switch (Method.Type)
             {
                 case MethodType.Unary:
-                    StartUnaryCore(new PushUnaryContent<TRequest, TResponse>(retryBuffer[0], this));
-                    break;
+                    {
+                        StartUnaryCore(new PushUnaryContent<TRequest, TResponse>(retryBuffer[0], this));
+                        break;
+                    }
                 case MethodType.ClientStreaming:
-                    break;
+                    {
+                        var clientStreamWriter = new HttpContentClientStreamWriter<TRequest, TResponse>(this);
+                        var content = new PushStreamContent<TRequest, TResponse>(clientStreamWriter, retryBuffer, clientStreamCompleted);
+                        StartClientStreamingCore(clientStreamWriter, content);
+                        break;
+                    }
                 case MethodType.ServerStreaming:
-                    StartServerStreamingCore(new RetryContent<TRequest, TResponse>(retryBuffer, this));
-                    break;
+                    {
+                        StartServerStreamingCore(new PushUnaryContent<TRequest, TResponse>(retryBuffer[0], this));
+                        break;
+                    }
                 case MethodType.DuplexStreaming:
-                    break;
+                    {
+                        var clientStreamWriter = new HttpContentClientStreamWriter<TRequest, TResponse>(this);
+                        var content = new PushStreamContent<TRequest, TResponse>(clientStreamWriter, retryBuffer, clientStreamCompleted);
+                        StartDuplexStreamingCore(clientStreamWriter, content);
+                        break;
+                    }
                 default:
                     throw new InvalidOperationException($"Unexpected method type: {Method.Type}");
             }
         }
 
-        public void StartUnary(TRequest request)
-        {
-            StartUnaryCore(new PushUnaryContent<TRequest, TResponse>(
-                request,
-                this));
-        }
+        public void StartUnary(TRequest request) => StartUnaryCore(new PushUnaryContent<TRequest, TResponse>(request, this));
 
         public void StartClientStreaming()
         {
-            _responseTcs = new TaskCompletionSource<TResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var clientStreamWriter = new HttpContentClientStreamWriter<TRequest, TResponse>(this);
+            var content = new PushStreamContent<TRequest, TResponse>(clientStreamWriter);
 
-            var timeout = GetTimeout();
-            var message = CreateHttpRequestMessage(timeout);
-            CreateWriter(message);
-            _ = RunCall(message, timeout);
+            StartClientStreamingCore(clientStreamWriter, content);
         }
 
-        public void StartServerStreaming(TRequest request)
+        public void StartServerStreaming(TRequest request) => StartServerStreamingCore(new PushUnaryContent<TRequest, TResponse>(request, this));
+
+        public void StartDuplexStreaming()
         {
-            StartServerStreamingCore(new PushUnaryContent<TRequest, TResponse>(
-                request,
-                this));
+            var clientStreamWriter = new HttpContentClientStreamWriter<TRequest, TResponse>(this);
+            var content = new PushStreamContent<TRequest, TResponse>(clientStreamWriter);
+
+            StartDuplexStreamingCore(clientStreamWriter, content);
         }
 
         private void StartUnaryCore(HttpContent content)
@@ -174,11 +184,21 @@ namespace Grpc.Net.Client.Internal
             _ = RunCall(message, timeout);
         }
 
-        public void StartDuplexStreaming()
+        private void StartClientStreamingCore(HttpContentClientStreamWriter<TRequest, TResponse> clientStreamWriter, HttpContent content)
+        {
+            _responseTcs = new TaskCompletionSource<TResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            var timeout = GetTimeout();
+            var message = CreateHttpRequestMessage(timeout);
+            SetWriter(message, clientStreamWriter, content);
+            _ = RunCall(message, timeout);
+        }
+
+        public void StartDuplexStreamingCore(HttpContentClientStreamWriter<TRequest, TResponse> clientStreamWriter, HttpContent content)
         {
             var timeout = GetTimeout();
             var message = CreateHttpRequestMessage(timeout);
-            CreateWriter(message);
+            SetWriter(message, clientStreamWriter, content);
             ClientStreamReader = new HttpContentClientStreamReader<TRequest, TResponse>(this);
             _ = RunCall(message, timeout);
         }
@@ -830,12 +850,11 @@ namespace Grpc.Net.Client.Internal
             }
         }
 
-        private void CreateWriter(HttpRequestMessage message)
+        private void SetWriter(HttpRequestMessage message, HttpContentClientStreamWriter<TRequest, TResponse> clientStreamWriter, HttpContent content)
         {
             RequestGrpcEncoding = GrpcProtocolHelpers.GetRequestEncoding(message.Headers);
-            ClientStreamWriter = new HttpContentClientStreamWriter<TRequest, TResponse>(this);
-
-            message.Content = new PushStreamContent<TRequest, TResponse>(ClientStreamWriter, GrpcProtocolConstants.GrpcContentTypeHeaderValue);
+            ClientStreamWriter = clientStreamWriter;
+            message.Content = content;
         }
 
         private HttpRequestMessage CreateHttpRequestMessage(TimeSpan? timeout)

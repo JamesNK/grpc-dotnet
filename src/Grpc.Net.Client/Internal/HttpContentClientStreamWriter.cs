@@ -144,6 +144,33 @@ namespace Grpc.Net.Client.Internal
         {
         }
 
+        public GrpcCall<TRequest, TResponse> Call => _call;
+
+        public async Task WriteAsyncCore(ReadOnlyMemory<byte> message, Stream writeStream)
+        {
+            try
+            {
+                // WriteOptions set on the writer take precedence over the CallOptions.WriteOptions
+                var callOptions = _call.Options;
+                if (WriteOptions != null)
+                {
+                    // Creates a copy of the struct
+                    callOptions = callOptions.WithWriteOptions(WriteOptions);
+                }
+
+                await _call.WriteMessageAsync(writeStream, message, callOptions).ConfigureAwait(false);
+
+                // Flush stream to ensure messages are sent immediately
+                await writeStream.FlushAsync(callOptions.CancellationToken).ConfigureAwait(false);
+
+                GrpcEventSource.Log.MessageSent();
+            }
+            catch (OperationCanceledException) when (!_call.Channel.ThrowOperationCanceledOnCancellation)
+            {
+                throw _call.CreateCanceledStatusException();
+            }
+        }
+
         private async Task WriteAsyncCore(TRequest message)
         {
             try

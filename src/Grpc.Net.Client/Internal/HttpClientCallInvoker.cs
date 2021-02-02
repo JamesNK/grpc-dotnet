@@ -184,12 +184,25 @@ namespace Grpc.Net.Client.Internal
                     _writtenMessages.Add(buffer);
                     return _inner.WriteAsync(buffer, cancellationToken);
                 }
+                protected override void Dispose(bool disposing)
+                {
+                    base.Dispose(disposing);
+                    if (disposing)
+                    {
+                        _inner.Dispose();
+                    }
+                }
+                public override async ValueTask DisposeAsync()
+                {
+                    await base.DisposeAsync().ConfigureAwait(false);
+                    await _inner.DisposeAsync().ConfigureAwait(false);
+                }
             }
 
-            private GrpcCall<TRequest, TResponse> RetryCall()
+            private GrpcCall<TRequest, TResponse> RetryCall(bool clientStreamCompleted)
             {
                 var call = CreateGrpcCall<TRequest, TResponse>(_channel, _method, _options);
-                call.StartRetry(_writtenMessages);
+                call.StartRetry(_writtenMessages, clientStreamCompleted);
 
                 return call;
             }
@@ -210,7 +223,7 @@ namespace Grpc.Net.Client.Internal
 
                             lock (_lock)
                             {
-                                _call = RetryCall();
+                                _call = RetryCall(_call.ClientStreamWriter?.CompleteTcs.Task.IsCompletedSuccessfully ?? false);
                                 _callTcs.TrySetResult(_call);
                                 _callTcs = new TaskCompletionSource<GrpcCall<TRequest, TResponse>?>(TaskCreationOptions.RunContinuationsAsynchronously);
                             }
