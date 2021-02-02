@@ -16,10 +16,10 @@
 
 #endregion
 
+using System;
 using System.IO;
 using System.Net;
 using System.Net.Http;
-using System.Net.Http.Headers;
 using System.Threading.Tasks;
 
 namespace Grpc.Net.Client.Internal
@@ -28,19 +28,41 @@ namespace Grpc.Net.Client.Internal
         where TRequest : class
         where TResponse : class
     {
-        private readonly TRequest _content;
+        private readonly TRequest? _content;
+        private readonly ReadOnlyMemory<byte> _data;
         private readonly GrpcCall<TRequest, TResponse> _call;
 
-        public PushUnaryContent(TRequest content, GrpcCall<TRequest, TResponse> call, MediaTypeHeaderValue mediaType)
+        public PushUnaryContent(TRequest content, GrpcCall<TRequest, TResponse> call) : this(call)
         {
             _content = content;
+        }
+
+        public PushUnaryContent(ReadOnlyMemory<byte> data, GrpcCall<TRequest, TResponse> call) : this(call)
+        {
+            _data = data;
+        }
+
+        private PushUnaryContent(GrpcCall<TRequest, TResponse> call)
+        {
             _call = call;
-            Headers.ContentType = mediaType;
+            Headers.ContentType = GrpcProtocolConstants.GrpcContentTypeHeaderValue;
         }
 
         protected override Task SerializeToStreamAsync(Stream stream, TransportContext? context)
         {
-            var writeMessageTask = _call.WriteMessageAsync(stream, _content, _call.Options);
+            ValueTask writeMessageTask;
+            if (_content != null)
+            {
+                if (_call.StreamWrapper != null)
+                {
+                    stream = _call.StreamWrapper(stream);
+                }
+                writeMessageTask = _call.WriteMessageAsync(stream, _content, _call.Options);
+            }
+            else
+            {
+                writeMessageTask = _call.WriteMessageAsync(stream, _data, _call.Options);
+            }
             if (writeMessageTask.IsCompletedSuccessfully)
             {
                 GrpcEventSource.Log.MessageSent();

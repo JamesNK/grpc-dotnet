@@ -128,6 +128,11 @@ namespace Grpc.Net.Client
         public bool ThrowOperationCanceledOnCancellation { get; set; }
 
         /// <summary>
+        /// 
+        /// </summary>
+        public IDictionary<string, object>? ServiceConfig { get; set; }
+
+        /// <summary>
         /// Initializes a new instance of the <see cref="GrpcChannelOptions"/> class.
         /// </summary>
         public GrpcChannelOptions()

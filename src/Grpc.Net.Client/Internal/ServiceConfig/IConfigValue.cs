@@ -16,25 +16,10 @@
 
 #endregion
 
-using System;
-using Grpc.Core;
-
-namespace Grpc.Net.Client.Internal
+namespace Grpc.Net.Client.Internal.ServiceConfig
 {
-    /// <summary>
-    /// Cached log scope and URI for a gRPC <see cref="IMethod"/>.
-    /// </summary>
-    internal class GrpcMethodInfo
+    internal interface IConfigValue
     {
-        public GrpcMethodInfo(GrpcCallScope logScope, Uri callUri, MethodConfig? methodConfig)
-        {
-            LogScope = logScope;
-            CallUri = callUri;
-            MethodConfig = methodConfig;
-        }
-
-        public GrpcCallScope LogScope { get; }
-        public Uri CallUri { get; }
-        public MethodConfig? MethodConfig { get; }
+        object Inner { get; }
     }
 }

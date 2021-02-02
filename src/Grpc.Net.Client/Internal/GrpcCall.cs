@@ -17,6 +17,8 @@
 #endregion
 
 using System;
+using System.Buffers;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.IO;
@@ -30,7 +32,23 @@ using Microsoft.Extensions.Logging;
 
 namespace Grpc.Net.Client.Internal
 {
-    internal sealed partial class GrpcCall<TRequest, TResponse> : GrpcCall, IDisposable
+    internal interface IGrpcCall<TRequest, TResponse> : IDisposable
+    {
+        Task<TResponse> GetResponseAsync();
+        Task<Metadata> GetResponseHeadersAsync();
+        Status GetStatus();
+        Metadata GetTrailers();
+
+        IClientStreamWriter<TRequest>? ClientStreamWriter { get; }
+        IAsyncStreamReader<TResponse>? ClientStreamReader { get; }
+
+        void StartUnary(TRequest request);
+        void StartClientStreaming();
+        void StartServerStreaming(TRequest request);
+        void StartDuplexStreaming();
+    }
+
+    internal sealed partial class GrpcCall<TRequest, TResponse> : GrpcCall, IGrpcCall<TRequest, TResponse>
         where TRequest : class
         where TResponse : class
     {
@@ -48,6 +66,7 @@ namespace Grpc.Net.Client.Internal
 
         public bool Disposed { get; private set; }
         public Method<TRequest, TResponse> Method { get; }
+        public Func<Stream, Stream>? StreamWrapper { get; set; }
 
         // These are set depending on the type of gRPC call
         private TaskCompletionSource<TResponse>? _responseTcs;
@@ -70,6 +89,8 @@ namespace Grpc.Net.Client.Internal
             Channel.RegisterActiveCall(this);
         }
 
+        public MethodConfig? MethodConfig => _grpcMethodInfo.MethodConfig;
+
         private void ValidateDeadline(DateTime? deadline)
         {
             if (deadline != null && deadline != DateTime.MaxValue && deadline != DateTime.MinValue && deadline.Value.Kind != DateTimeKind.Utc)
@@ -88,14 +109,33 @@ namespace Grpc.Net.Client.Internal
         public override Type RequestType => typeof(TRequest);
         public override Type ResponseType => typeof(TResponse);
 
+        IClientStreamWriter<TRequest>? IGrpcCall<TRequest, TResponse>.ClientStreamWriter => ClientStreamWriter;
+        IAsyncStreamReader<TResponse>? IGrpcCall<TRequest, TResponse>.ClientStreamReader => ClientStreamReader;
+
+        public void StartRetry(List<ReadOnlyMemory<byte>> retryBuffer)
+        {
+            switch (Method.Type)
+            {
+                case MethodType.Unary:
+                    StartUnaryCore(new PushUnaryContent<TRequest, TResponse>(retryBuffer[0], this));
+                    break;
+                case MethodType.ClientStreaming:
+                    break;
+                case MethodType.ServerStreaming:
+                    StartServerStreamingCore(new RetryContent<TRequest, TResponse>(retryBuffer, this));
+                    break;
+                case MethodType.DuplexStreaming:
+                    break;
+                default:
+                    throw new InvalidOperationException($"Unexpected method type: {Method.Type}");
+            }
+        }
+
         public void StartUnary(TRequest request)
         {
-            _responseTcs = new TaskCompletionSource<TResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
-
-            var timeout = GetTimeout();
-            var message = CreateHttpRequestMessage(timeout);
-            SetMessageContent(request, message);
-            _ = RunCall(message, timeout);
+            StartUnaryCore(new PushUnaryContent<TRequest, TResponse>(
+                request,
+                this));
         }
 
         public void StartClientStreaming()
@@ -110,9 +150,26 @@ namespace Grpc.Net.Client.Internal
 
         public void StartServerStreaming(TRequest request)
         {
+            StartServerStreamingCore(new PushUnaryContent<TRequest, TResponse>(
+                request,
+                this));
+        }
+
+        private void StartUnaryCore(HttpContent content)
+        {
+            _responseTcs = new TaskCompletionSource<TResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
+
             var timeout = GetTimeout();
             var message = CreateHttpRequestMessage(timeout);
-            SetMessageContent(request, message);
+            SetMessageContent(content, message);
+            _ = RunCall(message, timeout);
+        }
+
+        private void StartServerStreamingCore(HttpContent content)
+        {
+            var timeout = GetTimeout();
+            var message = CreateHttpRequestMessage(timeout);
+            SetMessageContent(content, message);
             ClientStreamReader = new HttpContentClientStreamReader<TRequest, TResponse>(this);
             _ = RunCall(message, timeout);
         }
@@ -357,13 +414,10 @@ namespace Grpc.Net.Client.Internal
             }
         }
 
-        private void SetMessageContent(TRequest request, HttpRequestMessage message)
+        private void SetMessageContent(HttpContent content, HttpRequestMessage message)
         {
             RequestGrpcEncoding = GrpcProtocolHelpers.GetRequestEncoding(message.Headers);
-            message.Content = new PushUnaryContent<TRequest, TResponse>(
-                request,
-                this,
-                GrpcProtocolConstants.GrpcContentTypeHeaderValue);
+            message.Content = content;
         }
 
         public void CancelCallFromCancellationToken()
@@ -896,6 +950,17 @@ namespace Grpc.Net.Client.Internal
             GrpcEventSource.Log.CallDeadlineExceeded();
 
             CancelCall(new Status(StatusCode.DeadlineExceeded, string.Empty));
+        }
+
+        internal ValueTask WriteMessageAsync(
+            Stream stream,
+            ReadOnlyMemory<byte> message,
+            CallOptions callOptions)
+        {
+            return stream.WriteMessageAsync(
+                this,
+                message,
+                callOptions);
         }
 
         internal ValueTask WriteMessageAsync(

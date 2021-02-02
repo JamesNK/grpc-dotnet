@@ -281,5 +281,28 @@ namespace Grpc.Net.Client
                 serializationContext.Reset();
             }
         }
+
+        public static async ValueTask WriteMessageAsync(
+            this Stream stream,
+            GrpcCall call,
+            ReadOnlyMemory<byte> data,
+            CallOptions callOptions)
+        {
+            try
+            {
+                GrpcCallLog.SendingMessage(call.Logger);
+
+                // Sending the header+content in a single WriteAsync call has significant performance benefits
+                // https://github.com/dotnet/runtime/issues/35184#issuecomment-626304981
+                await stream.WriteAsync(data, callOptions.CancellationToken).ConfigureAwait(false);
+
+                GrpcCallLog.MessageSent(call.Logger);
+            }
+            catch (Exception ex)
+            {
+                GrpcCallLog.ErrorSendingMessage(call.Logger, ex);
+                throw;
+            }
+        }
     }
 }

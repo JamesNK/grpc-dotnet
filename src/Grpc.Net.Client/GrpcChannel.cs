@@ -41,6 +41,7 @@ namespace Grpc.Net.Client
 
         private readonly ConcurrentDictionary<IMethod, GrpcMethodInfo> _methodInfoCache;
         private readonly Func<IMethod, GrpcMethodInfo> _createMethodInfoFunc;
+        private readonly Dictionary<MethodKey, MethodConfig>? _serviceConfigMethods;
         // Internal for testing
         internal readonly HashSet<IDisposable> ActiveCalls;
 
@@ -55,6 +56,8 @@ namespace Grpc.Net.Client
         internal Dictionary<string, ICompressionProvider> CompressionProviders { get; }
         internal string MessageAcceptEncoding { get; }
         internal bool Disposed { get; private set; }
+        internal ServiceConfig? ServiceConfig { get; }
+        
 
         // Options that are set in unit tests
         internal ISystemClock Clock = SystemClock.Instance;
@@ -84,6 +87,9 @@ namespace Grpc.Net.Client
             ThrowOperationCanceledOnCancellation = channelOptions.ThrowOperationCanceledOnCancellation;
             _createMethodInfoFunc = CreateMethodInfo;
             ActiveCalls = new HashSet<IDisposable>();
+            // TODO(JamesNK): Underlying service config data is not copied
+            ServiceConfig = channelOptions.ServiceConfig != null ? new ServiceConfig(channelOptions.ServiceConfig) : null;
+            _serviceConfigMethods = (ServiceConfig != null) ? CreateServiceConfigMethods(ServiceConfig) : null;
 
             if (channelOptions.Credentials != null)
             {
@@ -95,6 +101,27 @@ namespace Grpc.Net.Client
 
                 ValidateChannelCredentials();
             }
+        }
+
+        private static Dictionary<MethodKey, MethodConfig> CreateServiceConfigMethods(ServiceConfig serviceConfig)
+        {
+            var configs = new Dictionary<MethodKey, MethodConfig>();
+            for (var i = 0; i < serviceConfig.MethodConfigs.Count; i++)
+            {
+                var methodConfig = serviceConfig.MethodConfigs[i];
+                for (var j = 0; j < methodConfig.Names.Count; j++)
+                {
+                    var name = methodConfig.Names[j];
+                    var methodKey = new MethodKey(name.Service, name.Method);
+                    if (configs.ContainsKey(methodKey))
+                    {
+                        throw new InvalidOperationException($"Duplicate method config found. Service: '{name.Service}', method: '{name.Method}'.");
+                    }
+                    configs[methodKey] = methodConfig;
+                }
+            }
+
+            return configs;
         }
 
         private static HttpMessageInvoker CreateInternalHttpInvoker(HttpMessageHandler? handler)
@@ -138,12 +165,68 @@ namespace Grpc.Net.Client
             return _methodInfoCache.GetOrAdd(method, _createMethodInfoFunc);
         }
 
+        private struct MethodKey : IEquatable<MethodKey>
+        {
+            public MethodKey(string? service, string? method)
+            {
+                Service = service;
+                Method = method;
+            }
+
+            public string? Service { get; }
+            public string? Method { get; }
+
+            public override bool Equals(object? obj)
+            {
+                if (obj is MethodKey n)
+                {
+                    return Equals(n);
+                }
+                return false;
+            }
+
+            public bool Equals(MethodKey other)
+            {
+                return other.Service == Service && other.Method == Method;
+            }
+
+            public override int GetHashCode()
+            {
+#pragma warning disable CA1307 // Specify StringComparison
+                return Service?.GetHashCode() ?? 0 ^ Method?.GetHashCode() ?? 0;
+#pragma warning restore CA1307 // Specify StringComparison
+            }
+        }
+
         private GrpcMethodInfo CreateMethodInfo(IMethod method)
         {
             var uri = new Uri(method.FullName, UriKind.Relative);
             var scope = new GrpcCallScope(method.Type, uri);
+            var methodConfig = ResolveMethodConfig(method);
 
-            return new GrpcMethodInfo(scope, new Uri(Address, uri));
+            return new GrpcMethodInfo(scope, new Uri(Address, uri), methodConfig);
+        }
+
+        private MethodConfig? ResolveMethodConfig(IMethod method)
+        {
+            if (_serviceConfigMethods != null)
+            {
+                MethodConfig? methodConfig;
+                if (_serviceConfigMethods.TryGetValue(new MethodKey(method.ServiceName, method.Name), out methodConfig))
+                {
+                    return methodConfig;
+                }
+                if (_serviceConfigMethods.TryGetValue(new MethodKey(method.ServiceName, null), out methodConfig))
+                {
+                    return methodConfig;
+                }
+                if (_serviceConfigMethods.TryGetValue(new MethodKey(null, null), out methodConfig))
+                {
+                    return methodConfig;
+                }
+            }
+
+            return null;
         }
 
         private static Dictionary<string, ICompressionProvider> ResolveCompressionProviders(IList<ICompressionProvider>? compressionProviders)

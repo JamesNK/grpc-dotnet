@@ -234,7 +234,7 @@ namespace Grpc.Net.Client.Tests
 
             return new GrpcCall<HelloRequest, HelloReply>(
                 ClientTestHelpers.ServiceMethod,
-                new GrpcMethodInfo(new GrpcCallScope(ClientTestHelpers.ServiceMethod.Type, uri), uri),
+                new GrpcMethodInfo(new GrpcCallScope(ClientTestHelpers.ServiceMethod.Type, uri), uri, methodConfig: null),
                 new CallOptions(),
                 channel);
         }
