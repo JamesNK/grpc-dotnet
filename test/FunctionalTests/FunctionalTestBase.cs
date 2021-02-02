@@ -22,6 +22,7 @@ using System.Linq;
 using Grpc.AspNetCore.FunctionalTests.Infrastructure;
 using Grpc.Core;
 using Grpc.Net.Client;
+using Grpc.Net.Client.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using NUnit.Framework;
@@ -41,11 +42,12 @@ namespace Grpc.AspNetCore.FunctionalTests
 
         protected GrpcChannel Channel => _channel ??= CreateChannel();
 
-        protected GrpcChannel CreateChannel(bool useHandler = false)
+        protected GrpcChannel CreateChannel(bool useHandler = false, ServiceConfig? serviceConfig = null)
         {
             var options = new GrpcChannelOptions
             {
-                LoggerFactory = LoggerFactory
+                LoggerFactory = LoggerFactory,
+                ServiceConfig = serviceConfig
             };
             if (useHandler)
             {

@@ -35,7 +35,7 @@ namespace Grpc.Tests.Shared
         {
             const int Retrys = 10;
 
-            for (int i = 0; i < Retrys; i++)
+            for (var i = 0; i < Retrys; i++)
             {
                 if (i > 0)
                 {
@@ -54,7 +54,7 @@ namespace Grpc.Tests.Shared
         public static async Task RunParallel(int count, Func<int, Task> action)
         {
             var actionTasks = new Task[count];
-            for (int i = 0; i < actionTasks.Length; i++)
+            for (var i = 0; i < actionTasks.Length; i++)
             {
                 actionTasks[i] = action(i);
             }

@@ -18,6 +18,7 @@
 
 using System;
 using Grpc.Core;
+using Grpc.Net.Client.Configuration;
 
 namespace Grpc.Net.Client.Internal
 {
@@ -26,13 +27,15 @@ namespace Grpc.Net.Client.Internal
     /// </summary>
     internal class GrpcMethodInfo
     {
-        public GrpcMethodInfo(GrpcCallScope logScope, Uri callUri)
+        public GrpcMethodInfo(GrpcCallScope logScope, Uri callUri, MethodConfig? methodConfig)
         {
             LogScope = logScope;
             CallUri = callUri;
+            MethodConfig = methodConfig;
         }
 
         public GrpcCallScope LogScope { get; }
         public Uri CallUri { get; }
+        public MethodConfig? MethodConfig { get; }
     }
 }

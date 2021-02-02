@@ -17,6 +17,7 @@
 #endregion
 
 using System;
+using System.Collections.Generic;
 using System.Net.Http;
 using Grpc.Net.Client.Internal;
 using Microsoft.Extensions.Logging;
@@ -32,12 +33,14 @@ namespace Grpc.Net.Client.Tests.Infrastructure
             Action<GrpcChannelOptions>? configure = null,
             bool? disableClientDeadline = null,
             long? maxTimerPeriod = null,
-            IOperatingSystem? operatingSystem = null)
+            IOperatingSystem? operatingSystem = null,
+            IDictionary<string, object>? serviceConfig = null)
         {
             var channelOptions = new GrpcChannelOptions
             {
                 LoggerFactory = loggerFactory,
-                HttpClient = httpClient
+                HttpClient = httpClient,
+                ServiceConfig = serviceConfig
             };
             configure?.Invoke(channelOptions);
 

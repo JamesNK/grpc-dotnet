@@ -23,10 +23,13 @@ using System.Linq;
 using System.Net.Http;
 using Grpc.Core;
 using Grpc.Net.Client.Internal;
+using Grpc.Net.Client.Configuration;
+using GrpcServiceConfig = Grpc.Net.Client.Configuration.ServiceConfig;
 using Grpc.Net.Compression;
 using Grpc.Shared;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Grpc.Net.Client.Internal.Retry;
 
 namespace Grpc.Net.Client
 {
@@ -41,6 +44,7 @@ namespace Grpc.Net.Client
 
         private readonly ConcurrentDictionary<IMethod, GrpcMethodInfo> _methodInfoCache;
         private readonly Func<IMethod, GrpcMethodInfo> _createMethodInfoFunc;
+        private readonly Dictionary<MethodKey, MethodConfig>? _serviceConfigMethods;
         // Internal for testing
         internal readonly HashSet<IDisposable> ActiveCalls;
 
@@ -55,6 +59,8 @@ namespace Grpc.Net.Client
         internal Dictionary<string, ICompressionProvider> CompressionProviders { get; }
         internal string MessageAcceptEncoding { get; }
         internal bool Disposed { get; private set; }
+        internal GrpcServiceConfig? ServiceConfig { get; }
+        internal ChannelRetryThrottling? RetryThrottling { get; }
 
         // Options that are set in unit tests
         internal ISystemClock Clock = SystemClock.Instance;
@@ -84,6 +90,10 @@ namespace Grpc.Net.Client
             ThrowOperationCanceledOnCancellation = channelOptions.ThrowOperationCanceledOnCancellation;
             _createMethodInfoFunc = CreateMethodInfo;
             ActiveCalls = new HashSet<IDisposable>();
+            // TODO(JamesNK): Underlying service config data is not copied
+            ServiceConfig = channelOptions.ServiceConfig != null ? new GrpcServiceConfig(channelOptions.ServiceConfig) : null;
+            RetryThrottling = ServiceConfig?.RetryThrottling != null ? new ChannelRetryThrottling(ServiceConfig.RetryThrottling) : null;
+            _serviceConfigMethods = (ServiceConfig != null) ? CreateServiceConfigMethods(ServiceConfig) : null;
 
             if (channelOptions.Credentials != null)
             {
@@ -95,6 +105,27 @@ namespace Grpc.Net.Client
 
                 ValidateChannelCredentials();
             }
+        }
+
+        private static Dictionary<MethodKey, MethodConfig> CreateServiceConfigMethods(GrpcServiceConfig serviceConfig)
+        {
+            var configs = new Dictionary<MethodKey, MethodConfig>();
+            for (var i = 0; i < serviceConfig.MethodConfigs.Count; i++)
+            {
+                var methodConfig = serviceConfig.MethodConfigs[i];
+                for (var j = 0; j < methodConfig.Names.Count; j++)
+                {
+                    var name = methodConfig.Names[j];
+                    var methodKey = new MethodKey(name.Service, name.Method);
+                    if (configs.ContainsKey(methodKey))
+                    {
+                        throw new InvalidOperationException($"Duplicate method config found. Service: '{name.Service}', method: '{name.Method}'.");
+                    }
+                    configs[methodKey] = methodConfig;
+                }
+            }
+
+            return configs;
         }
 
         private static HttpMessageInvoker CreateInternalHttpInvoker(HttpMessageHandler? handler)
@@ -142,8 +173,31 @@ namespace Grpc.Net.Client
         {
             var uri = new Uri(method.FullName, UriKind.Relative);
             var scope = new GrpcCallScope(method.Type, uri);
+            var methodConfig = ResolveMethodConfig(method);
 
-            return new GrpcMethodInfo(scope, new Uri(Address, uri));
+            return new GrpcMethodInfo(scope, new Uri(Address, uri), methodConfig);
+        }
+
+        private MethodConfig? ResolveMethodConfig(IMethod method)
+        {
+            if (_serviceConfigMethods != null)
+            {
+                MethodConfig? methodConfig;
+                if (_serviceConfigMethods.TryGetValue(new MethodKey(method.ServiceName, method.Name), out methodConfig))
+                {
+                    return methodConfig;
+                }
+                if (_serviceConfigMethods.TryGetValue(new MethodKey(method.ServiceName, null), out methodConfig))
+                {
+                    return methodConfig;
+                }
+                if (_serviceConfigMethods.TryGetValue(new MethodKey(null, null), out methodConfig))
+                {
+                    return methodConfig;
+                }
+            }
+
+            return null;
         }
 
         private static Dictionary<string, ICompressionProvider> ResolveCompressionProviders(IList<ICompressionProvider>? compressionProviders)
@@ -154,7 +208,7 @@ namespace Grpc.Net.Client
             }
 
             var resolvedCompressionProviders = new Dictionary<string, ICompressionProvider>(StringComparer.Ordinal);
-            for (int i = 0; i < compressionProviders.Count; i++)
+            for (var i = 0; i < compressionProviders.Count; i++)
             {
                 var compressionProvider = compressionProviders[i];
                 if (!resolvedCompressionProviders.ContainsKey(compressionProvider.EncodingName))
@@ -195,47 +249,6 @@ namespace Grpc.Net.Client
             var invoker = new HttpClientCallInvoker(this);
 
             return invoker;
-        }
-
-        private class DefaultChannelCredentialsConfigurator : ChannelCredentialsConfiguratorBase
-        {
-            public bool? IsSecure { get; private set; }
-            public List<CallCredentials>? CallCredentials { get; private set; }
-
-            public override void SetCompositeCredentials(object state, ChannelCredentials channelCredentials, CallCredentials callCredentials)
-            {
-                channelCredentials.InternalPopulateConfiguration(this, null);
-
-                if (callCredentials != null)
-                {
-                    if (CallCredentials == null)
-                    {
-                        CallCredentials = new List<CallCredentials>();
-                    }
-
-                    CallCredentials.Add(callCredentials);
-                }
-            }
-
-            public override void SetInsecureCredentials(object state)
-            {
-                IsSecure = false;
-            }
-
-            public override void SetSslCredentials(object state, string rootCertificates, KeyCertificatePair keyCertificatePair, VerifyPeerCallback verifyPeerCallback)
-            {
-                if (!string.IsNullOrEmpty(rootCertificates) ||
-                    keyCertificatePair != null ||
-                    verifyPeerCallback != null)
-                {
-                    throw new InvalidOperationException(
-                        $"{nameof(SslCredentials)} with non-null arguments is not supported by {nameof(GrpcChannel)}. " +
-                        $"{nameof(GrpcChannel)} uses HttpClient to make gRPC calls and HttpClient automatically loads root certificates from the operating system certificate store. " +
-                        $"Client certificates should be configured on HttpClient. See https://aka.ms/AA6we64 for details.");
-                }
-
-                IsSecure = true;
-            }
         }
 
         /// <summary>
@@ -327,6 +340,26 @@ namespace Grpc.Net.Client
                 HttpInvoker.Dispose();
             }
             Disposed = true;
+        }
+
+        private struct MethodKey : IEquatable<MethodKey>
+        {
+            public MethodKey(string? service, string? method)
+            {
+                Service = service;
+                Method = method;
+            }
+
+            public string? Service { get; }
+            public string? Method { get; }
+
+            public override bool Equals(object? obj) => obj is MethodKey n ? Equals(n) : false;
+
+            public bool Equals(MethodKey other) => other.Service == Service && other.Method == Method;
+
+            public override int GetHashCode() =>
+                Service?.GetHashCode(StringComparison.Ordinal) ?? 0 ^
+                Method?.GetHashCode(StringComparison.Ordinal) ?? 0;
         }
     }
 }

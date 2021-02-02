@@ -126,7 +126,7 @@ namespace Grpc.Net.Client.Tests
         }
 
         [Test]
-        public async Task AsyncUnaryCall_NonOkStatusTrailer_AccessResponse_ReturnHeaders()
+        public async Task AsyncUnaryCall_NonOkStatusTrailer_AccessResponse_ThrowRpcError()
         {
             // Arrange
             var httpClient = ClientTestHelpers.CreateTestClient(request =>
@@ -144,7 +144,7 @@ namespace Grpc.Net.Client.Tests
         }
 
         [Test]
-        public async Task AsyncUnaryCall_NonOkStatusTrailer_AccessHeaders_ThrowRpcError()
+        public async Task AsyncUnaryCall_NonOkStatusTrailer_AccessHeaders_ReturnHeaders()
         {
             // Arrange
             var httpClient = ClientTestHelpers.CreateTestClient(request =>

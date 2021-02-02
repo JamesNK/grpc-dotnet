@@ -20,7 +20,6 @@ using System;
 using System.IO;
 using System.Net;
 using System.Net.Http;
-using System.Net.Http.Headers;
 using System.Threading.Tasks;
 
 namespace Grpc.Net.Client.Internal
@@ -30,11 +29,19 @@ namespace Grpc.Net.Client.Internal
         where TResponse : class
     {
         private readonly HttpContentClientStreamWriter<TRequest, TResponse> _streamWriter;
+        private readonly Func<Stream, ValueTask>? _startCallback;
 
-        public PushStreamContent(HttpContentClientStreamWriter<TRequest, TResponse> streamWriter, MediaTypeHeaderValue mediaType)
+        public PushStreamContent(HttpContentClientStreamWriter<TRequest, TResponse> streamWriter)
         {
-            Headers.ContentType = mediaType;
+            Headers.ContentType = GrpcProtocolConstants.GrpcContentTypeHeaderValue;
             _streamWriter = streamWriter;
+        }
+
+        public PushStreamContent(
+            HttpContentClientStreamWriter<TRequest, TResponse> streamWriter,
+            Func<Stream, ValueTask>? startCallback) : this(streamWriter)
+        {
+            _startCallback = startCallback;
         }
 
         protected override async Task SerializeToStreamAsync(Stream stream, TransportContext? context)
@@ -42,6 +49,11 @@ namespace Grpc.Net.Client.Internal
             // Immediately flush request stream to send headers
             // https://github.com/dotnet/corefx/issues/39586#issuecomment-516210081
             await stream.FlushAsync().ConfigureAwait(false);
+
+            if (_startCallback != null)
+            {
+                await _startCallback(stream).ConfigureAwait(false);
+            }
 
             // Pass request stream to writer
             _streamWriter.WriteStreamTcs.TrySetResult(stream);

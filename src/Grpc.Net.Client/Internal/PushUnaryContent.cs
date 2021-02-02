@@ -16,31 +16,30 @@
 
 #endregion
 
+using System;
 using System.IO;
 using System.Net;
 using System.Net.Http;
-using System.Net.Http.Headers;
 using System.Threading.Tasks;
 
 namespace Grpc.Net.Client.Internal
 {
+    // TODO: Still need generic args?
     internal class PushUnaryContent<TRequest, TResponse> : HttpContent
         where TRequest : class
         where TResponse : class
     {
-        private readonly TRequest _content;
-        private readonly GrpcCall<TRequest, TResponse> _call;
+        private readonly Func<Stream, ValueTask> _startCallback;
 
-        public PushUnaryContent(TRequest content, GrpcCall<TRequest, TResponse> call, MediaTypeHeaderValue mediaType)
+        public PushUnaryContent(Func<Stream, ValueTask> startCallback)
         {
-            _content = content;
-            _call = call;
-            Headers.ContentType = mediaType;
+            _startCallback = startCallback;
+            Headers.ContentType = GrpcProtocolConstants.GrpcContentTypeHeaderValue;
         }
 
         protected override Task SerializeToStreamAsync(Stream stream, TransportContext? context)
         {
-            var writeMessageTask = _call.WriteMessageAsync(stream, _content, _call.Options);
+            var writeMessageTask = _startCallback(stream);
             if (writeMessageTask.IsCompletedSuccessfully)
             {
                 GrpcEventSource.Log.MessageSent();

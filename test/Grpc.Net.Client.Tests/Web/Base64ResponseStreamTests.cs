@@ -46,7 +46,7 @@ namespace Grpc.Net.Client.Tests.Web
             var messageCount = 3;
 
             var streamContent = new List<byte>();
-            for (int i = 0; i < messageCount; i++)
+            for (var i = 0; i < messageCount; i++)
             {
                 streamContent.AddRange(messageContent);
             }
@@ -54,7 +54,7 @@ namespace Grpc.Net.Client.Tests.Web
             var ms = new LimitedReadMemoryStream(streamContent.ToArray(), 3);
             var base64Stream = new Base64ResponseStream(ms);
 
-            for (int i = 0; i < messageCount; i++)
+            for (var i = 0; i < messageCount; i++)
             {
                 // Assert 1
                 var resolvedHeaderData = await ReadContent(base64Stream, 5, CancellationToken.None);
