@@ -56,61 +56,6 @@ namespace Grpc.Net.Client.Internal
 
         private Stream WrapStream(Stream arg) => new RetryCaptureStream(arg, _writtenMessages);
 
-        private class RetryCaptureStream : Stream
-        {
-            private readonly Stream _inner;
-            private readonly List<ReadOnlyMemory<byte>> _writtenMessages;
-
-            public RetryCaptureStream(Stream inner, List<ReadOnlyMemory<byte>> writtenMessages)
-            {
-                _inner = inner;
-                _writtenMessages = writtenMessages;
-            }
-
-            public override bool CanRead => _inner.CanRead;
-            public override bool CanSeek => _inner.CanSeek;
-            public override bool CanWrite => _inner.CanWrite;
-            public override long Length => _inner.Length;
-            public override long Position
-            {
-                get => _inner.Position;
-                set => _inner.Position = value;
-            }
-
-            public override void Flush() => _inner.Flush();
-            public override int Read(byte[] buffer, int offset, int count) => _inner.Read(buffer, offset, count);
-            public override long Seek(long offset, SeekOrigin origin) => _inner.Seek(offset, origin);
-            public override void SetLength(long value) => _inner.SetLength(value);
-            public override void Write(byte[] buffer, int offset, int count) => _inner.Write(buffer, offset, count);
-
-            public override Task FlushAsync(CancellationToken cancellationToken) => _inner.FlushAsync(cancellationToken);
-            public override Task CopyToAsync(Stream destination, int bufferSize, CancellationToken cancellationToken) => _inner.CopyToAsync(destination, bufferSize, cancellationToken);
-            public override void Write(ReadOnlySpan<byte> buffer) => throw new NotSupportedException();
-            public override Task WriteAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
-            {
-                _writtenMessages.Add(buffer);
-                return _inner.WriteAsync(buffer, offset, count, cancellationToken);
-            }
-            public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
-            {
-                _writtenMessages.Add(buffer);
-                return _inner.WriteAsync(buffer, cancellationToken);
-            }
-            protected override void Dispose(bool disposing)
-            {
-                base.Dispose(disposing);
-                if (disposing)
-                {
-                    _inner.Dispose();
-                }
-            }
-            public override async ValueTask DisposeAsync()
-            {
-                await base.DisposeAsync().ConfigureAwait(false);
-                await _inner.DisposeAsync().ConfigureAwait(false);
-            }
-        }
-
         private GrpcCall<TRequest, TResponse> RetryCall(bool clientStreamCompleted)
         {
             var call = HttpClientCallInvoker.CreateGrpcCall<TRequest, TResponse>(_channel, _method, _options);
@@ -221,6 +166,61 @@ namespace Grpc.Net.Client.Internal
         public void StartDuplexStreaming()
         {
             _call.StartDuplexStreaming();
+        }
+
+        private class RetryCaptureStream : Stream
+        {
+            private readonly Stream _inner;
+            private readonly List<ReadOnlyMemory<byte>> _writtenMessages;
+
+            public RetryCaptureStream(Stream inner, List<ReadOnlyMemory<byte>> writtenMessages)
+            {
+                _inner = inner;
+                _writtenMessages = writtenMessages;
+            }
+
+            public override bool CanRead => _inner.CanRead;
+            public override bool CanSeek => _inner.CanSeek;
+            public override bool CanWrite => _inner.CanWrite;
+            public override long Length => _inner.Length;
+            public override long Position
+            {
+                get => _inner.Position;
+                set => _inner.Position = value;
+            }
+
+            public override void Flush() => _inner.Flush();
+            public override int Read(byte[] buffer, int offset, int count) => _inner.Read(buffer, offset, count);
+            public override long Seek(long offset, SeekOrigin origin) => _inner.Seek(offset, origin);
+            public override void SetLength(long value) => _inner.SetLength(value);
+            public override void Write(byte[] buffer, int offset, int count) => _inner.Write(buffer, offset, count);
+
+            public override Task FlushAsync(CancellationToken cancellationToken) => _inner.FlushAsync(cancellationToken);
+            public override Task CopyToAsync(Stream destination, int bufferSize, CancellationToken cancellationToken) => _inner.CopyToAsync(destination, bufferSize, cancellationToken);
+            public override void Write(ReadOnlySpan<byte> buffer) => throw new NotSupportedException();
+            public override Task WriteAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+            {
+                _writtenMessages.Add(buffer);
+                return _inner.WriteAsync(buffer, offset, count, cancellationToken);
+            }
+            public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
+            {
+                _writtenMessages.Add(buffer);
+                return _inner.WriteAsync(buffer, cancellationToken);
+            }
+            protected override void Dispose(bool disposing)
+            {
+                base.Dispose(disposing);
+                if (disposing)
+                {
+                    _inner.Dispose();
+                }
+            }
+            public override async ValueTask DisposeAsync()
+            {
+                await base.DisposeAsync().ConfigureAwait(false);
+                await _inner.DisposeAsync().ConfigureAwait(false);
+            }
         }
     }
 }
