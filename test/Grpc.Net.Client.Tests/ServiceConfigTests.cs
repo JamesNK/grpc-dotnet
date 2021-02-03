@@ -186,6 +186,26 @@ namespace Grpc.Net.Client.Tests
         }
 
         [Test]
+        public void RetryThrottlingPolicy_ReadUnderlyingConfig_Success()
+        {
+            // Arrange
+            var inner = new Dictionary<string, object>
+            {
+                ["initialBackoff"] = "1.1s",
+                ["retryableStatusCodes"] = new List<object> { "UNAVAILABLE", "Aborted", 1 }
+            };
+
+            // Act
+            var retryPolicy = new RetryThrottlingPolicy(inner);
+
+            // Assert
+            Assert.AreEqual(TimeSpan.FromSeconds(1.1), retryPolicy.InitialBackoff);
+            Assert.AreEqual(StatusCode.Unavailable, retryPolicy.RetryableStatusCodes[0]);
+            Assert.AreEqual(StatusCode.Aborted, retryPolicy.RetryableStatusCodes[1]);
+            Assert.AreEqual(StatusCode.Cancelled, retryPolicy.RetryableStatusCodes[2]);
+        }
+
+        [Test]
         public void Name_AllServicesIsReadOnly_ErrorOnChange()
         {
             // Arrange & Act & Assert

@@ -102,11 +102,11 @@ namespace Grpc.Net.Client
 
     public sealed class RetryThrottlingPolicy : ConfigObject
     {
-        private const string MaxAttemptsPropertyName = "maxAttempts";
-        private const string InitialBackoffPropertyName = "initialBackoff";
-        private const string MaxBackoffPropertyName = "maxBackoff";
-        private const string BackoffMultiplierPropertyName = "backoffMultiplier";
-        private const string RetryableStatusCodesPropertyName = "retryableStatusCodes";
+        internal const string MaxAttemptsPropertyName = "maxAttempts";
+        internal const string InitialBackoffPropertyName = "initialBackoff";
+        internal const string MaxBackoffPropertyName = "maxBackoff";
+        internal const string BackoffMultiplierPropertyName = "backoffMultiplier";
+        internal const string RetryableStatusCodesPropertyName = "retryableStatusCodes";
 
         private ConfigProperty<Values<StatusCode, object>, IList<object>> _retryableStatusCodes =
             new(i => new Values<StatusCode, object>(i ?? new List<object>(), new List<StatusCode>(), s => ConvertStatusCode(s), s => ConvertStatusCode(s.ToString()!)), RetryableStatusCodesPropertyName);
@@ -141,7 +141,7 @@ namespace Grpc.Net.Client
 
         private static StatusCode ConvertStatusCode(string statusCode)
         {
-            return statusCode switch
+            return statusCode.ToUpperInvariant() switch
             {
                 "OK" => StatusCode.OK,
                 "CANCELLED" => StatusCode.Cancelled,
@@ -160,7 +160,9 @@ namespace Grpc.Net.Client
                 "INTERNAL" => StatusCode.Internal,
                 "UNAVAILABLE" => StatusCode.Unavailable,
                 "DATA_LOSS" => StatusCode.DataLoss,
-                _ => throw new InvalidOperationException($"Unexpected status code: {statusCode}")
+                _ => int.TryParse(statusCode, out var number)
+                    ? (StatusCode)number
+                    : throw new InvalidOperationException($"Unexpected status code: {statusCode}")
             };
         }
 
@@ -182,7 +184,7 @@ namespace Grpc.Net.Client
             set => SetValue(MaxBackoffPropertyName, ToDurationText(value));
         }
 
-        public double BackoffMultiplier
+        public double? BackoffMultiplier
         {
             get => GetValue<double>(BackoffMultiplierPropertyName);
             set => SetValue(BackoffMultiplierPropertyName, value);

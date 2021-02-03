@@ -133,7 +133,7 @@ namespace Grpc.Net.Client.Internal
             }
             else
             {
-                return new Retrier<TRequest, TResponse>(retryPolicy, channel, method, options);
+                return new RetryCall<TRequest, TResponse>(retryPolicy, channel, method, options);
             }
         }
 

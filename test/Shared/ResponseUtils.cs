@@ -48,7 +48,8 @@ namespace Grpc.Tests.Shared
             HttpContent payload,
             StatusCode? grpcStatusCode = StatusCode.OK,
             string? grpcEncoding = null,
-            Version? version = null)
+            Version? version = null,
+            string? retryPushbackHeader = null)
         {
             payload.Headers.ContentType = GrpcContentTypeHeaderValue;
 
@@ -59,6 +60,10 @@ namespace Grpc.Tests.Shared
             };
 
             message.Headers.Add(MessageEncodingHeader, grpcEncoding ?? IdentityGrpcEncoding);
+            if (retryPushbackHeader != null)
+            {
+                message.Headers.Add("grpc-retry-pushback-ms", retryPushbackHeader);
+            }
 
             if (grpcStatusCode != null)
             {

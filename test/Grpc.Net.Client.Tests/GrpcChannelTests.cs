@@ -149,6 +149,26 @@ namespace Grpc.Net.Client.Tests
         }
 
         [Test]
+        public void Build_ServiceConfigDuplicateMethodConfigNames_Error()
+        {
+            // Arrange & Act
+            var ex = Assert.Throws<InvalidOperationException>(() => GrpcChannel.ForAddress("https://localhost", new GrpcChannelOptions
+            {
+                ServiceConfig = new ServiceConfig
+                {
+                    MethodConfigs =
+                    {
+                        new MethodConfig { Names = { Name.AllServices } },
+                        new MethodConfig { Names = { Name.AllServices } }
+                    }
+                }
+            }));
+
+            // Assert
+            Assert.AreEqual("Duplicate method config found. Service: '', method: ''.", ex.Message);
+        }
+
+        [Test]
         public void Dispose_NotCalled_NotDisposed()
         {
             // Arrange
