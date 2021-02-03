@@ -369,6 +369,60 @@ namespace Grpc.Net.Client.Tests
             Assert.AreEqual("2", requestMessage!.Name);
         }
 
+        [Test]
+        public async Task AsyncServerStreamingCall_SuccessAfterRetry_RequestContentSent()
+        {
+            // Arrange
+            HttpContent? content = null;
+            SyncPoint syncPoint = new SyncPoint(runContinuationsAsynchronously: true);
+
+            var callCount = 0;
+            var httpClient = ClientTestHelpers.CreateTestClient(async request =>
+            {
+                callCount++;
+                content = request.Content!;
+
+                if (callCount == 1)
+                {
+                    await syncPoint.WaitForSyncPoint();
+
+                    await content.CopyToAsync(new MemoryStream());
+                    return ResponseUtils.CreateResponse(HttpStatusCode.OK, new StringContent(""), StatusCode.Unavailable);
+                }
+
+                syncPoint.Continue();
+
+                var reply = new HelloReply
+                {
+                    Message = "Hello world"
+                };
+
+                var streamContent = await ClientTestHelpers.CreateResponseContent(reply).DefaultTimeout();
+
+                return ResponseUtils.CreateResponse(HttpStatusCode.OK, streamContent);
+            });
+            var serviceConfig = CreateServiceConfig();
+            var invoker = HttpClientCallInvokerFactory.Create(httpClient, serviceConfig: serviceConfig);
+
+            // Act
+            var call = invoker.AsyncServerStreamingCall<HelloRequest, HelloReply>(ClientTestHelpers.GetServiceMethod(MethodType.ServerStreaming), string.Empty, new CallOptions(), new HelloRequest { Name = "World" });
+            var moveNextTask = call.ResponseStream.MoveNext(CancellationToken.None);
+
+            // Wait until the first call has failed and the second is on the server
+            await syncPoint.WaitToContinue();
+
+            // Assert
+            Assert.IsTrue(await moveNextTask);
+            Assert.AreEqual("Hello world", call.ResponseStream.Current.Message);
+
+            Assert.IsNotNull(content);
+
+            var requestContent = await content!.ReadAsStreamAsync().DefaultTimeout();
+            var requestMessage = await ReadRequestMessage(requestContent).DefaultTimeout();
+
+            Assert.AreEqual("World", requestMessage!.Name);
+        }
+
         private static Task<HelloRequest?> ReadRequestMessage(Stream requestContent)
         {
             return StreamSerializationHelper.ReadMessageAsync(
