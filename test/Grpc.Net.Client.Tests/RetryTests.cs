@@ -462,6 +462,52 @@ namespace Grpc.Net.Client.Tests
         }
 
         [Test]
+        public async Task AsyncServerStreamingCall_FailureAfterReadingResponseMessage_Failure()
+        {
+            // Arrange
+            var streamContent = new SyncPointMemoryStream();
+
+            var callCount = 0;
+            var httpClient = ClientTestHelpers.CreateTestClient(request =>
+            {
+                callCount++;
+                return Task.FromResult(ResponseUtils.CreateResponse(HttpStatusCode.OK, new StreamContent(streamContent)));
+            });
+            var serviceConfig = CreateServiceConfig();
+            var invoker = HttpClientCallInvokerFactory.Create(httpClient, serviceConfig: serviceConfig);
+
+            // Act
+            var call = invoker.AsyncServerStreamingCall<HelloRequest, HelloReply>(ClientTestHelpers.ServiceMethod, string.Empty, new CallOptions(), new HelloRequest());
+
+            var responseStream = call.ResponseStream;
+
+            // Assert
+            Assert.IsNull(responseStream.Current);
+
+            var moveNextTask1 = responseStream.MoveNext(CancellationToken.None);
+            Assert.IsFalse(moveNextTask1.IsCompleted);
+
+            await streamContent.AddDataAndWait(await ClientTestHelpers.GetResponseDataAsync(new HelloReply
+            {
+                Message = "Hello world 1"
+            }).DefaultTimeout()).DefaultTimeout();
+
+            Assert.IsTrue(await moveNextTask1.DefaultTimeout());
+            Assert.IsNotNull(responseStream.Current);
+            Assert.AreEqual("Hello world 1", responseStream.Current.Message);
+
+            var moveNextTask2 = responseStream.MoveNext(CancellationToken.None);
+            Assert.IsFalse(moveNextTask2.IsCompleted);
+
+            await streamContent.AddExceptionAndWait(new Exception("Exception!")).DefaultTimeout();
+
+            var ex = await ExceptionAssert.ThrowsAsync<RpcException>(() => moveNextTask2).DefaultTimeout();
+            Assert.AreEqual(StatusCode.Internal, ex.StatusCode);
+            Assert.AreEqual(StatusCode.Internal, call.GetStatus().StatusCode);
+            Assert.AreEqual("Error reading next message. Exception: Exception!", call.GetStatus().Detail);
+        }
+
+        [Test]
         public async Task AsyncDuplexStreamingCall_SuccessAfterRetry_RequestContentSent()
         {
             // Arrange
