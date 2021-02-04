@@ -278,8 +278,7 @@ namespace Grpc.Net.Client.Internal
                 return retryPushbackMilliseconds >= 0;
             }
 
-            if (_call.HttpResponse != null &&
-                GrpcProtocolHelpers.GetHeaderValue(_call.HttpResponse.Headers, GrpcProtocolConstants.StatusTrailer) != null)
+            if (!HasResponseHeaderStatus(_call))
             {
                 // If a HttpResponse has been received and it's not a "trailers only" response (contains status in header)
                 // then headers were returned before failure. The call is commited and can't be retried.
@@ -287,6 +286,12 @@ namespace Grpc.Net.Client.Internal
             }
 
             return _retryThrottlingPolicy.RetryableStatusCodes.Contains(status.StatusCode);
+        }
+
+        private static bool HasResponseHeaderStatus(GrpcCall<TRequest, TResponse> call)
+        {
+            return call.HttpResponse != null &&
+                GrpcProtocolHelpers.GetHeaderValue(call.HttpResponse.Headers, GrpcProtocolConstants.StatusTrailer) != null;
         }
 
         private async Task StartRetry()
@@ -357,7 +362,21 @@ namespace Grpc.Net.Client.Internal
                 GrpcCall<TRequest, TResponse> call = _call;
                 try
                 {
-                    return await call.GetResponseHeadersAsync().ConfigureAwait(false);
+                    var headers = await call.GetResponseHeadersAsync().ConfigureAwait(false);
+
+                    // GetResponseHeadersAsync won't throw if there is a trailers only error (i.e. grpc-status returned with headers).
+                    // Check whether a status was returned with the response headers and retry if it was.
+                    if (HasResponseHeaderStatus(call))
+                    {
+                        if (!await ResolveRetryTask(call).ConfigureAwait(false))
+                        {
+                            return headers;
+                        }
+                    }
+                    else
+                    {
+                        return headers;
+                    }
                 }
                 catch
                 {

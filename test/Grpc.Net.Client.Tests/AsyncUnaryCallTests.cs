@@ -125,7 +125,7 @@ namespace Grpc.Net.Client.Tests
         }
 
         [Test]
-        public async Task AsyncUnaryCall_NonOkStatusTrailer_ThrowRpcError()
+        public async Task AsyncUnaryCall_NonOkStatusTrailer_AccessResponse_ThrowRpcError()
         {
             // Arrange
             var httpClient = ClientTestHelpers.CreateTestClient(request =>
@@ -137,6 +137,24 @@ namespace Grpc.Net.Client.Tests
 
             // Act
             var ex = await ExceptionAssert.ThrowsAsync<RpcException>(() => invoker.AsyncUnaryCall<HelloRequest, HelloReply>(ClientTestHelpers.ServiceMethod, string.Empty, new CallOptions(), new HelloRequest()).ResponseAsync).DefaultTimeout();
+
+            // Assert
+            Assert.AreEqual(StatusCode.Unimplemented, ex.StatusCode);
+        }
+
+        [Test]
+        public async Task AsyncUnaryCall_NonOkStatusTrailer_AccessHeaders_ThrowRpcError()
+        {
+            // Arrange
+            var httpClient = ClientTestHelpers.CreateTestClient(request =>
+            {
+                var response = ResponseUtils.CreateResponse(HttpStatusCode.OK, new ByteArrayContent(Array.Empty<byte>()), StatusCode.Unimplemented);
+                return Task.FromResult(response);
+            });
+            var invoker = HttpClientCallInvokerFactory.Create(httpClient);
+
+            // Act
+            var ex = await ExceptionAssert.ThrowsAsync<RpcException>(() => invoker.AsyncUnaryCall<HelloRequest, HelloReply>(ClientTestHelpers.ServiceMethod, string.Empty, new CallOptions(), new HelloRequest()).ResponseHeadersAsync).DefaultTimeout();
 
             // Assert
             Assert.AreEqual(StatusCode.Unimplemented, ex.StatusCode);

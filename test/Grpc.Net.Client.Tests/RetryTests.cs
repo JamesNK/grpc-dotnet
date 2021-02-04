@@ -17,6 +17,7 @@
 #endregion
 
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Net;
 using System.Net.Http;
@@ -49,7 +50,7 @@ namespace Grpc.Net.Client.Tests
                 if (callCount == 1)
                 {
                     await content.CopyToAsync(new MemoryStream());
-                    return ResponseUtils.CreateResponse(HttpStatusCode.OK, new StringContent(""), StatusCode.Unavailable);
+                    return ResponseUtils.CreateHeadersOnlyResponse(HttpStatusCode.OK, StatusCode.Unavailable);
                 }
 
                 var reply = new HelloReply
@@ -65,11 +66,11 @@ namespace Grpc.Net.Client.Tests
             var invoker = HttpClientCallInvokerFactory.Create(httpClient, serviceConfig: serviceConfig);
 
             // Act
-            var rs = await invoker.AsyncUnaryCall<HelloRequest, HelloReply>(ClientTestHelpers.ServiceMethod, string.Empty, new CallOptions(), new HelloRequest { Name = "World" });
+            var call = invoker.AsyncUnaryCall<HelloRequest, HelloReply>(ClientTestHelpers.ServiceMethod, string.Empty, new CallOptions(), new HelloRequest { Name = "World" });
 
             // Assert
             Assert.AreEqual(2, callCount);
-            Assert.AreEqual("Hello world", rs.Message);
+            Assert.AreEqual("Hello world", (await call.ResponseAsync.DefaultTimeout()).Message);
 
             Assert.IsNotNull(content);
 
@@ -77,6 +78,59 @@ namespace Grpc.Net.Client.Tests
             var requestMessage = await ReadRequestMessage(requestContent).DefaultTimeout();
 
             Assert.AreEqual("World", requestMessage!.Name);
+        }
+
+        [Test]
+        public async Task AsyncUnaryCall_SuccessAfterRetry_AccessResponseHeaders_SuccessfullyResponseHeadersReturned()
+        {
+            // Arrange
+            HttpContent? content = null;
+            var syncPoint = new SyncPoint(runContinuationsAsynchronously: true);
+
+            var callCount = 0;
+            var httpClient = ClientTestHelpers.CreateTestClient(async request =>
+            {
+                callCount++;
+                content = request.Content!;
+
+                if (callCount == 1)
+                {
+                    await content.CopyToAsync(new MemoryStream());
+
+                    await syncPoint.WaitForSyncPoint();
+
+                    return ResponseUtils.CreateHeadersOnlyResponse(
+                        HttpStatusCode.OK,
+                        StatusCode.Unavailable,
+                        customHeaders: new Dictionary<string, string> { ["call-count"] = callCount.ToString() });
+                }
+
+                syncPoint.Continue();
+
+                var reply = new HelloReply { Message = "Hello world" };
+                var streamContent = await ClientTestHelpers.CreateResponseContent(reply).DefaultTimeout();
+
+                return ResponseUtils.CreateResponse(
+                    HttpStatusCode.OK,
+                    streamContent,
+                    customHeaders: new Dictionary<string, string> { ["call-count"] = callCount.ToString() });
+            });
+            var serviceConfig = CreateServiceConfig();
+            var invoker = HttpClientCallInvokerFactory.Create(httpClient, serviceConfig: serviceConfig);
+
+            // Act
+            var call = invoker.AsyncUnaryCall<HelloRequest, HelloReply>(ClientTestHelpers.ServiceMethod, string.Empty, new CallOptions(), new HelloRequest { Name = "World" });
+            var headersTask = call.ResponseHeadersAsync;
+
+            // Wait until the first call has failed and the second is on the server
+            await syncPoint.WaitToContinue();
+
+            // Assert
+            Assert.AreEqual(2, callCount);
+            Assert.AreEqual("Hello world", (await call.ResponseAsync.DefaultTimeout()).Message);
+
+            var headers = await headersTask.DefaultTimeout();
+            Assert.AreEqual("2", headers.GetValue("call-count"));
         }
 
         [Test]
@@ -88,7 +142,7 @@ namespace Grpc.Net.Client.Tests
             {
                 callCount++;
                 await request.Content!.CopyToAsync(new MemoryStream());
-                return ResponseUtils.CreateResponse(HttpStatusCode.OK, new StringContent(""), StatusCode.Unavailable);
+                return ResponseUtils.CreateHeadersOnlyResponse(HttpStatusCode.OK, StatusCode.Unavailable);
             });
             var serviceConfig = CreateServiceConfig(maxAttempts: 3);
             var invoker = HttpClientCallInvokerFactory.Create(httpClient, serviceConfig: serviceConfig);
@@ -171,7 +225,7 @@ namespace Grpc.Net.Client.Tests
             {
                 callCount++;
                 await request.Content!.CopyToAsync(new MemoryStream());
-                return ResponseUtils.CreateResponse(HttpStatusCode.OK, new StringContent(""), StatusCode.Unavailable, retryPushbackHeader: "0");
+                return ResponseUtils.CreateHeadersOnlyResponse(HttpStatusCode.OK, StatusCode.Unavailable, retryPushbackHeader: "0");
             });
             var serviceConfig = CreateServiceConfig(maxAttempts: 5);
             var invoker = HttpClientCallInvokerFactory.Create(httpClient, serviceConfig: serviceConfig);
@@ -221,11 +275,7 @@ namespace Grpc.Net.Client.Tests
                 callCount++;
                 content = request.Content;
 
-                var reply = new HelloReply
-                {
-                    Message = "Hello world"
-                };
-
+                var reply = new HelloReply { Message = "Hello world" };
                 var streamContent = await ClientTestHelpers.CreateResponseContent(reply).DefaultTimeout();
 
                 return ResponseUtils.CreateResponse(HttpStatusCode.OK, streamContent);
@@ -258,14 +308,10 @@ namespace Grpc.Net.Client.Tests
                 if (callCount == 1)
                 {
                     await content.CopyToAsync(new MemoryStream());
-                    return ResponseUtils.CreateResponse(HttpStatusCode.OK, new StringContent(""), StatusCode.Unavailable);
+                    return ResponseUtils.CreateHeadersOnlyResponse(HttpStatusCode.OK, StatusCode.Unavailable);
                 }
 
-                var reply = new HelloReply
-                {
-                    Message = "Hello world"
-                };
-
+                var reply = new HelloReply { Message = "Hello world" };
                 var streamContent = await ClientTestHelpers.CreateResponseContent(reply).DefaultTimeout();
 
                 return ResponseUtils.CreateResponse(HttpStatusCode.OK, streamContent);
@@ -319,18 +365,14 @@ namespace Grpc.Net.Client.Tests
 
                     await syncPoint.WaitForSyncPoint();
 
-                    return ResponseUtils.CreateResponse(HttpStatusCode.OK, new StringContent(""), StatusCode.Unavailable);
+                    return ResponseUtils.CreateHeadersOnlyResponse(HttpStatusCode.OK, StatusCode.Unavailable);
                 }
 
                 syncPoint.Continue();
 
                 await content.PushComplete.DefaultTimeout();
 
-                var reply = new HelloReply
-                {
-                    Message = "Hello world"
-                };
-
+                var reply = new HelloReply { Message = "Hello world" };
                 var streamContent = await ClientTestHelpers.CreateResponseContent(reply).DefaultTimeout();
 
                 return ResponseUtils.CreateResponse(HttpStatusCode.OK, streamContent);
@@ -351,7 +393,7 @@ namespace Grpc.Net.Client.Tests
             await call.RequestStream.WriteAsync(new HelloRequest { Name = "1" }).DefaultTimeout();
 
             // Wait until the first call has failed and the second is on the server
-            await syncPoint.WaitToContinue();
+            await syncPoint.WaitToContinue().DefaultTimeout();
 
             await call.RequestStream.WriteAsync(new HelloRequest { Name = "2" }).DefaultTimeout();
 
@@ -387,16 +429,12 @@ namespace Grpc.Net.Client.Tests
                     await syncPoint.WaitForSyncPoint();
 
                     await content.CopyToAsync(new MemoryStream());
-                    return ResponseUtils.CreateResponse(HttpStatusCode.OK, new StringContent(""), StatusCode.Unavailable);
+                    return ResponseUtils.CreateHeadersOnlyResponse(HttpStatusCode.OK, StatusCode.Unavailable);
                 }
 
                 syncPoint.Continue();
 
-                var reply = new HelloReply
-                {
-                    Message = "Hello world"
-                };
-
+                var reply = new HelloReply { Message = "Hello world" };
                 var streamContent = await ClientTestHelpers.CreateResponseContent(reply).DefaultTimeout();
 
                 return ResponseUtils.CreateResponse(HttpStatusCode.OK, streamContent);
@@ -409,7 +447,7 @@ namespace Grpc.Net.Client.Tests
             var moveNextTask = call.ResponseStream.MoveNext(CancellationToken.None);
 
             // Wait until the first call has failed and the second is on the server
-            await syncPoint.WaitToContinue();
+            await syncPoint.WaitToContinue().DefaultTimeout();
 
             // Assert
             Assert.IsTrue(await moveNextTask);
@@ -421,6 +459,67 @@ namespace Grpc.Net.Client.Tests
             var requestMessage = await ReadRequestMessage(requestContent).DefaultTimeout();
 
             Assert.AreEqual("World", requestMessage!.Name);
+        }
+
+        [Test]
+        public async Task AsyncDuplexStreamingCall_SuccessAfterRetry_RequestContentSent()
+        {
+            // Arrange
+            PushStreamContent<HelloRequest, HelloReply>? content = null;
+            SyncPoint syncPoint = new SyncPoint(runContinuationsAsynchronously: true);
+
+            var callCount = 0;
+            var httpClient = ClientTestHelpers.CreateTestClient(async request =>
+            {
+                callCount++;
+                content = (PushStreamContent<HelloRequest, HelloReply>)request.Content!;
+
+                if (callCount == 1)
+                {
+                    _ = content.CopyToAsync(new MemoryStream());
+
+                    await syncPoint.WaitForSyncPoint();
+
+                    return ResponseUtils.CreateHeadersOnlyResponse(HttpStatusCode.OK, StatusCode.Unavailable);
+                }
+
+                syncPoint.Continue();
+
+                await content.PushComplete.DefaultTimeout();
+
+                var reply = new HelloReply { Message = "Hello world" };
+                var streamContent = await ClientTestHelpers.CreateResponseContent(reply).DefaultTimeout();
+
+                return ResponseUtils.CreateResponse(HttpStatusCode.OK, streamContent);
+            });
+            var serviceConfig = CreateServiceConfig();
+            var invoker = HttpClientCallInvokerFactory.Create(httpClient, serviceConfig: serviceConfig);
+
+            // Act
+            var call = invoker.AsyncDuplexStreamingCall<HelloRequest, HelloReply>(ClientTestHelpers.GetServiceMethod(MethodType.DuplexStreaming), string.Empty, new CallOptions());
+            var moveNextTask = call.ResponseStream.MoveNext(CancellationToken.None);
+
+            await call.RequestStream.WriteAsync(new HelloRequest { Name = "1" }).DefaultTimeout();
+
+            // Wait until the first call has failed and the second is on the server
+            await syncPoint.WaitToContinue().DefaultTimeout();
+
+            await call.RequestStream.WriteAsync(new HelloRequest { Name = "2" }).DefaultTimeout();
+
+            await call.RequestStream.CompleteAsync().DefaultTimeout();
+
+            // Assert
+            Assert.IsTrue(await moveNextTask.DefaultTimeout());
+            Assert.AreEqual("Hello world", call.ResponseStream.Current.Message);
+
+            Assert.IsNotNull(content);
+
+            var streamTask = content!.ReadAsStreamAsync().DefaultTimeout();
+            var requestContent = await streamTask.DefaultTimeout();
+            var requestMessage = await ReadRequestMessage(requestContent).DefaultTimeout();
+            Assert.AreEqual("1", requestMessage!.Name);
+            requestMessage = await ReadRequestMessage(requestContent).DefaultTimeout();
+            Assert.AreEqual("2", requestMessage!.Name);
         }
 
         private static Task<HelloRequest?> ReadRequestMessage(Stream requestContent)
