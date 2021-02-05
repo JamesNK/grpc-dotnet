@@ -41,11 +41,12 @@ namespace Grpc.AspNetCore.FunctionalTests
 
         protected GrpcChannel Channel => _channel ??= CreateChannel();
 
-        protected GrpcChannel CreateChannel(bool useHandler = false)
+        protected GrpcChannel CreateChannel(bool useHandler = false, ServiceConfig? serviceConfig = null)
         {
             var options = new GrpcChannelOptions
             {
-                LoggerFactory = LoggerFactory
+                LoggerFactory = LoggerFactory,
+                ServiceConfig = serviceConfig
             };
             if (useHandler)
             {

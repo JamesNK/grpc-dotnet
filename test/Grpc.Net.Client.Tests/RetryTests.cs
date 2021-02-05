@@ -157,6 +157,33 @@ namespace Grpc.Net.Client.Tests
             Assert.AreEqual(StatusCode.Unavailable, call.GetStatus().StatusCode);
         }
 
+        [Test]
+        public async Task AsyncUnaryCall_FailureWithLongDelay_Dispose_CallImmediatelyDisposed()
+        {
+            // Arrange
+            var callCount = 0;
+            var httpClient = ClientTestHelpers.CreateTestClient(async request =>
+            {
+                callCount++;
+                await request.Content!.CopyToAsync(new MemoryStream());
+                return ResponseUtils.CreateHeadersOnlyResponse(HttpStatusCode.OK, StatusCode.Unavailable);
+            });
+            // Very long delay
+            var serviceConfig = CreateServiceConfig(initialBackoff: TimeSpan.FromSeconds(30), maxBackoff: TimeSpan.FromSeconds(30));
+            var invoker = HttpClientCallInvokerFactory.Create(httpClient, serviceConfig: serviceConfig);
+
+            // Act
+            var call = invoker.AsyncUnaryCall<HelloRequest, HelloReply>(ClientTestHelpers.ServiceMethod, string.Empty, new CallOptions(), new HelloRequest { Name = "World" });
+            var resultTask = call.ResponseAsync;
+
+            // Test will timeout if dispose doesn't kill the timer.
+            call.Dispose();
+
+            // Assert
+            var ex = await ExceptionAssert.ThrowsAsync<RpcException>(() => resultTask).DefaultTimeout();
+            Assert.AreEqual(StatusCode.Unavailable, ex.StatusCode);
+        }
+
         [TestCase("")]
         [TestCase("-1")]
         [TestCase("stop")]
@@ -580,7 +607,7 @@ namespace Grpc.Net.Client.Tests
                 CancellationToken.None).AsTask();
         }
 
-        private static ServiceConfig CreateServiceConfig(int? maxAttempts = null, double? backoffMultiplier = null)
+        private static ServiceConfig CreateServiceConfig(int? maxAttempts = null, TimeSpan? initialBackoff = null, TimeSpan? maxBackoff = null, double? backoffMultiplier = null)
         {
             return new ServiceConfig
             {
@@ -592,9 +619,9 @@ namespace Grpc.Net.Client.Tests
                         RetryPolicy = new RetryThrottlingPolicy
                         {
                             MaxAttempts = maxAttempts ?? 5,
-                            InitialBackoff = TimeSpan.Zero,
-                            MaxBackoff = TimeSpan.Zero,
-                            BackoffMultiplier = backoffMultiplier ?? 1.1,
+                            InitialBackoff = initialBackoff ?? TimeSpan.Zero,
+                            MaxBackoff = maxBackoff ?? TimeSpan.Zero,
+                            BackoffMultiplier = backoffMultiplier ?? 1,
                             RetryableStatusCodes = { StatusCode.Unavailable }
                         }
                     }

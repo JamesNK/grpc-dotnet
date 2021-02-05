@@ -64,13 +64,18 @@ namespace Grpc.Testing
             await EnsureEchoMetadataAsync(context);
 
             int sum = 0;
-            await requestStream.ForEachAsync(request =>
+            while (await requestStream.MoveNext())
             {
+                var request = requestStream.Current;
+                if (sum > 0)
+                {
+                    return new StreamingInputCallResponse { AggregatedPayloadSize = sum };
+                }
                 EnsureCompression(request.ExpectCompressed, context);
 
                 sum += request.Payload.Body.Length;
-                return Task.CompletedTask;
-            });
+            }
+
             return new StreamingInputCallResponse { AggregatedPayloadSize = sum };
         }
 

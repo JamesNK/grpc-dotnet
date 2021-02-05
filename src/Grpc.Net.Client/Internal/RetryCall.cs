@@ -24,13 +24,18 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Grpc.Core;
+using Microsoft.Extensions.Logging;
 
 namespace Grpc.Net.Client.Internal
 {
-    internal class RetryCall<TRequest, TResponse> : IGrpcCall<TRequest, TResponse>
+    internal partial class RetryCall<TRequest, TResponse> : IGrpcCall<TRequest, TResponse>
         where TRequest : class
         where TResponse : class
     {
+        // Getting logger name from generic type is slow. Cached copy.
+        private const string LoggerName = "Grpc.Net.Client.Internal.RetryCall";
+
+        private readonly ILogger _logger;
         private readonly RetryThrottlingPolicy _retryThrottlingPolicy;
         private readonly GrpcChannel _channel;
         private readonly Method<TRequest, TResponse> _method;
@@ -38,6 +43,7 @@ namespace Grpc.Net.Client.Internal
         private readonly List<ReadOnlyMemory<byte>> _writtenMessages;
         private readonly Random _random;
         private readonly object _lock = new object();
+        private readonly CancellationTokenSource _retryCts = new CancellationTokenSource();
 
         private int _attemptCount;
         private int _nextRetryDelayMilliseconds;
@@ -79,11 +85,10 @@ namespace Grpc.Net.Client.Internal
             public RetryClientStreamWriter(RetryCall<TRequest, TResponse> retryCall)
             {
                 _retryCall = retryCall;
+                WriteOptions = retryCall._call.Options.WriteOptions;
             }
 
-            private HttpContentClientStreamWriter<TRequest, TResponse> InnerWriter => _retryCall._call.ClientStreamWriter!;
-
-            public WriteOptions? WriteOptions { get; set; }
+            public WriteOptions WriteOptions { get; set; }
 
             public async Task CompleteAsync()
             {
@@ -92,7 +97,7 @@ namespace Grpc.Net.Client.Internal
                     GrpcCall<TRequest, TResponse> call = _retryCall._call;
                     try
                     {
-                        await InnerWriter.CompleteAsync().ConfigureAwait(false);
+                        await call.ClientStreamWriter!.CompleteAsync().ConfigureAwait(false);
                         return;
                     }
                     catch
@@ -101,8 +106,6 @@ namespace Grpc.Net.Client.Internal
                         {
                             throw;
                         }
-
-                        Debug.Assert(call != _retryCall._call);
                     }
                 }
             }
@@ -114,7 +117,10 @@ namespace Grpc.Net.Client.Internal
                     GrpcCall<TRequest, TResponse> call = _retryCall._call;
                     try
                     {
-                        await InnerWriter.WriteAsync(message).ConfigureAwait(false);
+                        var writer = call.ClientStreamWriter!;
+                        writer.WriteOptions = WriteOptions;
+
+                        await writer.WriteAsync(message).ConfigureAwait(false);
                         return;
                     }
                     catch
@@ -123,8 +129,6 @@ namespace Grpc.Net.Client.Internal
                         {
                             throw;
                         }
-
-                        Debug.Assert(call != _retryCall._call);
                     }
                 }
             }
@@ -161,8 +165,6 @@ namespace Grpc.Net.Client.Internal
                         {
                             throw;
                         }
-
-                        Debug.Assert(call != _retryCall._call);
                     }
                 }
             }
@@ -170,6 +172,7 @@ namespace Grpc.Net.Client.Internal
 
         public RetryCall(RetryThrottlingPolicy retryThrottlingPolicy, GrpcChannel channel, Method<TRequest, TResponse> method, CallOptions options)
         {
+            _logger = channel.LoggerFactory.CreateLogger(LoggerName);
             _retryThrottlingPolicy = retryThrottlingPolicy;
             _channel = channel;
             _method = method;
@@ -237,25 +240,34 @@ namespace Grpc.Net.Client.Internal
                     {
                         throw;
                     }
-
-                    Debug.Assert(call != _call);
                 }
             }
         }
 
-        private Task<bool> ResolveRetryTask(GrpcCall<TRequest, TResponse> call)
+        private async Task<bool> ResolveRetryTask(GrpcCall<TRequest, TResponse> call)
         {
+            Task<bool> canRetryTask;
             lock (_lock)
             {
                 // New call has already been made
                 if (call != _call)
                 {
-                    return Task.FromResult(true);
+                    return true;
                 }
 
                 // Wait to see whether new call will be made
-                return _canRetryTcs.Task;
+                canRetryTask = _canRetryTcs.Task;
             }
+
+            var canRetry = await canRetryTask.ConfigureAwait(false);
+            if (canRetry)
+            {
+                // Verify a new call has been made
+                Debug.Assert(call != _call);
+                return true;
+            }
+
+            return false;
         }
 
         private int CalculateNextRetryDelay()
@@ -266,26 +278,47 @@ namespace Grpc.Net.Client.Internal
             return Convert.ToInt32(nextMilliseconds);
         }
 
-        private bool CanRetry(Status status, int? retryPushbackMilliseconds)
+        private RetryResult EvaluateRetry(Status status, int? retryPushbackMilliseconds)
         {
             if (_attemptCount >= _retryThrottlingPolicy.MaxAttempts.GetValueOrDefault())
             {
-                return false;
+                return RetryResult.ExceededAttemptCount;
             }
 
             if (retryPushbackMilliseconds != null)
             {
-                return retryPushbackMilliseconds >= 0;
+                if (retryPushbackMilliseconds >= 0)
+                {
+                    return RetryResult.Retry;
+                }
+                else
+                {
+                    return RetryResult.PushbackStop;
+                }
             }
 
             if (!HasResponseHeaderStatus(_call))
             {
                 // If a HttpResponse has been received and it's not a "trailers only" response (contains status in header)
                 // then headers were returned before failure. The call is commited and can't be retried.
-                return false;
+                return RetryResult.CallCommited;
             }
 
-            return _retryThrottlingPolicy.RetryableStatusCodes.Contains(status.StatusCode);
+            if (!_retryThrottlingPolicy.RetryableStatusCodes.Contains(status.StatusCode))
+            {
+                return RetryResult.NotRetryableStatusCode;
+            }
+
+            return RetryResult.Retry;
+        }
+
+        private enum RetryResult
+        {
+            Retry,
+            ExceededAttemptCount,
+            CallCommited,
+            NotRetryableStatusCode,
+            PushbackStop
         }
 
         private static bool HasResponseHeaderStatus(GrpcCall<TRequest, TResponse> call)
@@ -296,6 +329,10 @@ namespace Grpc.Net.Client.Internal
 
         private async Task StartRetry()
         {
+            // This is the main retry loop. It will:
+            // 1. Check the result of the active call was successful.
+            // 2. If it was unsuccessful then evaluate if the call can be retried.
+            // 3. If it can be retried then start a new active call and begin again.
             while (true)
             {
                 var status = await _call.CallTask.ConfigureAwait(false);
@@ -305,54 +342,90 @@ namespace Grpc.Net.Client.Internal
                     return;
                 }
 
-                // https://github.com/grpc/proposal/blob/master/A6-client-retries.md#pushback
-                int? explicitPushbackMilliseconds = null;
-                if (_call.HttpResponse != null)
+                try
                 {
-                    if (_call.HttpResponse.Headers.TryGetValues("grpc-retry-pushback-ms", out var values))
+                    var retryPushbackMS = GetRetryPushback();
+
+                    var result = EvaluateRetry(status, retryPushbackMS);
+                    Log.RetryEvaluated(_logger, status.StatusCode, _attemptCount, result);
+
+                    if (result == RetryResult.Retry)
                     {
-                        if (int.TryParse(values.Single(), out var value))
+                        TimeSpan delayDuration;
+                        if (retryPushbackMS != null)
                         {
-                            explicitPushbackMilliseconds = value;
+                            delayDuration = TimeSpan.FromMilliseconds(retryPushbackMS.GetValueOrDefault());
+                            _nextRetryDelayMilliseconds = retryPushbackMS.GetValueOrDefault();
                         }
                         else
                         {
-                            explicitPushbackMilliseconds = -1;
+                            delayDuration = TimeSpan.FromMilliseconds(_random.Next(0, Convert.ToInt32(_nextRetryDelayMilliseconds)));
                         }
-                    }
-                }
 
-                if (CanRetry(status, explicitPushbackMilliseconds))
-                {
-                    if (explicitPushbackMilliseconds != null)
-                    {
-                        await Task.Delay(explicitPushbackMilliseconds.GetValueOrDefault()).ConfigureAwait(false);
-                        _nextRetryDelayMilliseconds = explicitPushbackMilliseconds.GetValueOrDefault();
+                        Log.StartingRetryDelay(_logger, delayDuration);
+                        await Task.Delay(delayDuration, _retryCts.Token).ConfigureAwait(false);
+
+                        _nextRetryDelayMilliseconds = CalculateNextRetryDelay();
+
+                        lock (_lock)
+                        {
+                            // Check if dispose was called on call.
+                            _retryCts.Token.ThrowIfCancellationRequested();
+
+                            // Clean up the failed call.
+                            _call.Dispose();
+
+                            // Start new call.
+                            _attemptCount++;
+                            _call = CreateRetryCall(_call.ClientStreamWriter?.CompleteTcs.Task.IsCompletedSuccessfully ?? false);
+
+                            // Signal any calls to public APIs (e.g. ResponseAsync, MoveNext, WriteAsync)
+                            // that have thrown and are caught in catch blocks and are waiting for the call to retry.
+                            _canRetryTcs.TrySetResult(true);
+
+                            // Create a new TCS for future failures.
+                            _canRetryTcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+                        }
                     }
                     else
                     {
-                        await Task.Delay(_random.Next(0, Convert.ToInt32(_nextRetryDelayMilliseconds))).ConfigureAwait(false);
-                    }
-
-                    _nextRetryDelayMilliseconds = CalculateNextRetryDelay();
-
-                    lock (_lock)
-                    {
-                        _attemptCount++;
-                        _call = CreateRetryCall(_call.ClientStreamWriter?.CompleteTcs.Task.IsCompletedSuccessfully ?? false);
-                        _canRetryTcs.TrySetResult(true);
-
-                        // TODO(JamesNK): What if TCS is awaited after it is reset?
-                        _canRetryTcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+                        // Can't retry.
+                        // Signal public API exceptions that they should finish throwing and then exit the retry loop.
+                        _canRetryTcs.TrySetResult(false);
+                        return;
                     }
                 }
-                else
+                catch (Exception ex)
                 {
+                    // Cancellation token triggered by dispose could throw here. Only log unexpected errors.
+                    if (ex is not OperationCanceledException || !_retryCts.IsCancellationRequested)
+                    {
+                        Log.ErrorRetryingCall(_logger, ex);
+                    }
+
                     _canRetryTcs.TrySetResult(false);
-                    // Failure and can't retry. Exit retry loop.
                     return;
                 }
             }
+        }
+
+        private int? GetRetryPushback()
+        {
+            // https://github.com/grpc/proposal/blob/master/A6-client-retries.md#pushback
+            if (_call.HttpResponse != null)
+            {
+                if (_call.HttpResponse.Headers.TryGetValues(GrpcProtocolConstants.RetryPushbackHeader, out var values))
+                {
+                    var headerValue = values.Single();
+                    Log.RetryPushbackReceived(_logger, headerValue);
+
+                    // A non-integer value means the server wants retries to stop.
+                    // Resolve non-integer value to a negative integer which also means stop.
+                    return int.TryParse(headerValue, out var value) ? value : -1;
+                }
+            }
+
+            return null;
         }
 
         public async Task<Metadata> GetResponseHeadersAsync()
@@ -384,8 +457,6 @@ namespace Grpc.Net.Client.Internal
                     {
                         throw;
                     }
-
-                    Debug.Assert(call != _call);
                 }
             }
         }
@@ -402,7 +473,11 @@ namespace Grpc.Net.Client.Internal
 
         public void Dispose()
         {
-            _call.Dispose();
+            lock (_lock)
+            {
+                _retryCts.Cancel();
+                _call.Dispose();
+            }
         }
 
         public void StartUnary(TRequest request)
