@@ -21,7 +21,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 
-namespace Grpc.Net.Client.Internal.Config
+namespace Grpc.Net.Client.Internal.Configuration
 {
     internal class KeyedValues<T> : IDictionary<string, T>, IConfigValue
     {

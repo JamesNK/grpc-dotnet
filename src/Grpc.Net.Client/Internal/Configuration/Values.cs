@@ -20,7 +20,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 
-namespace Grpc.Net.Client.Internal.Config
+namespace Grpc.Net.Client.Internal.Configuration
 {
     internal class Values<T, TInner> : IList<T>, IConfigValue
     {
