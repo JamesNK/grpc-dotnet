@@ -22,7 +22,7 @@ using System.Threading.Tasks;
 using Google.Protobuf;
 using Grpc.AspNetCore.FunctionalTests.Infrastructure;
 using Grpc.Core;
-using Grpc.Net.Client;
+using Grpc.Net.Client.Configuration;
 using Grpc.Tests.Shared;
 using Microsoft.Extensions.Logging;
 using NUnit.Framework;
@@ -124,7 +124,39 @@ namespace Grpc.AspNetCore.FunctionalTests.Client
             AssertHasLog(LogLevel.Debug, "RetryEvaluated", "Evaluated retry decision for failed gRPC call. Status code: 'Unavailable', Attempt: 5, Decision: ExceededAttemptCount");
         }
 
-        private static ServiceConfig CreateServiceConfig(int? maxAttempts = null, double? backoffMultiplier = null)
+        [Test]
+        public async Task Unary_TriggerRetryThrottling_Failure()
+        {
+            var callCount = 0;
+            Task<DataMessage> UnaryFailure(DataMessage request, ServerCallContext context)
+            {
+                callCount++;
+                return Task.FromException<DataMessage>(new RpcException(new Status(StatusCode.Unavailable, "")));
+            }
+
+            // Arrange
+            var method = Fixture.DynamicGrpc.AddUnaryMethod<DataMessage, DataMessage>(UnaryFailure);
+
+            var channel = CreateChannel(serviceConfig: CreateServiceConfig(retryThrottling: new RetryThrottlingPolicy
+            {
+                MaxTokens = 5,
+                TokenRatio = 0.1
+            }));
+
+            var client = TestClientFactory.Create(channel, method);
+
+            // Act
+            var call = client.UnaryCall(new DataMessage());
+
+            // Assert
+            var ex = await ExceptionAssert.ThrowsAsync<RpcException>(() => call.ResponseAsync).DefaultTimeout();
+            Assert.AreEqual(StatusCode.Unavailable, ex.StatusCode);
+            Assert.AreEqual(StatusCode.Unavailable, call.GetStatus().StatusCode);
+
+            AssertHasLog(LogLevel.Debug, "RetryEvaluated", "Evaluated retry decision for failed gRPC call. Status code: 'Unavailable', Attempt: 3, Decision: Throttled");
+        }
+
+        private static ServiceConfig CreateServiceConfig(int? maxAttempts = null, double? backoffMultiplier = null, RetryThrottlingPolicy? retryThrottling = null)
         {
             return new ServiceConfig
             {
@@ -133,7 +165,7 @@ namespace Grpc.AspNetCore.FunctionalTests.Client
                     new MethodConfig
                     {
                         Names = { Name.All },
-                        RetryPolicy = new RetryThrottlingPolicy
+                        RetryPolicy = new RetryPolicy
                         {
                             MaxAttempts = maxAttempts ?? 5,
                             InitialBackoff = TimeSpan.Zero,
@@ -142,7 +174,8 @@ namespace Grpc.AspNetCore.FunctionalTests.Client
                             RetryableStatusCodes = { StatusCode.Unavailable }
                         }
                     }
-                }
+                },
+                RetryThrottling = retryThrottling
             };
         }
     }

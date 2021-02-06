@@ -17,8 +17,9 @@
 #endregion
 
 using System;
+using Grpc.Net.Client.Configuration;
 
-namespace Grpc.Net.Client.Internal.ServiceConfig
+namespace Grpc.Net.Client.Internal.Config
 {
     internal struct ConfigProperty<TValue, TInner> where TValue : IConfigValue
     {

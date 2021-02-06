@@ -25,6 +25,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Greet;
 using Grpc.Core;
+using Grpc.Net.Client.Configuration;
 using Grpc.Net.Client.Internal;
 using Grpc.Net.Client.Tests.Infrastructure;
 using Grpc.Tests.Shared;
@@ -613,7 +614,7 @@ namespace Grpc.Net.Client.Tests
                     new MethodConfig
                     {
                         Names = { Name.All },
-                        RetryPolicy = new RetryThrottlingPolicy
+                        RetryPolicy = new RetryPolicy
                         {
                             MaxAttempts = maxAttempts ?? 5,
                             InitialBackoff = initialBackoff ?? TimeSpan.Zero,

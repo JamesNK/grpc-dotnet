@@ -18,6 +18,7 @@
 
 using System;
 using Grpc.Core;
+using Grpc.Net.Client.Configuration;
 
 namespace Grpc.Net.Client.Internal
 {

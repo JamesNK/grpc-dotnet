@@ -19,6 +19,7 @@
 using System;
 using System.Collections.Generic;
 using Grpc.Core;
+using Grpc.Net.Client.Configuration;
 using NUnit.Framework;
 
 namespace Grpc.Net.Client.Tests
@@ -37,7 +38,7 @@ namespace Grpc.Net.Client.Tests
                     new MethodConfig
                     {
                         Names = { new Name() },
-                        RetryPolicy = new RetryThrottlingPolicy
+                        RetryPolicy = new RetryPolicy
                         {
                             MaxAttempts = 5,
                             InitialBackoff = TimeSpan.FromSeconds(1),
@@ -109,7 +110,7 @@ namespace Grpc.Net.Client.Tests
             };
 
             // Act
-            var retryPolicy = new RetryThrottlingPolicy(inner);
+            var retryPolicy = new RetryPolicy(inner);
 
             // Assert
             Assert.AreEqual(TimeSpan.FromSeconds(1.1), retryPolicy.InitialBackoff);

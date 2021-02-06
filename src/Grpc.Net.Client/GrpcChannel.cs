@@ -23,10 +23,13 @@ using System.Linq;
 using System.Net.Http;
 using Grpc.Core;
 using Grpc.Net.Client.Internal;
+using Grpc.Net.Client.Configuration;
+using GrpcServiceConfig = Grpc.Net.Client.Configuration.ServiceConfig;
 using Grpc.Net.Compression;
 using Grpc.Shared;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Grpc.Net.Client.Internal.Retry;
 
 namespace Grpc.Net.Client
 {
@@ -56,7 +59,8 @@ namespace Grpc.Net.Client
         internal Dictionary<string, ICompressionProvider> CompressionProviders { get; }
         internal string MessageAcceptEncoding { get; }
         internal bool Disposed { get; private set; }
-        internal ServiceConfig? ServiceConfig { get; }
+        internal GrpcServiceConfig? ServiceConfig { get; }
+        internal ChannelRetryThrottling? RetryThrottling { get; }
 
         // Options that are set in unit tests
         internal ISystemClock Clock = SystemClock.Instance;
@@ -87,7 +91,8 @@ namespace Grpc.Net.Client
             _createMethodInfoFunc = CreateMethodInfo;
             ActiveCalls = new HashSet<IDisposable>();
             // TODO(JamesNK): Underlying service config data is not copied
-            ServiceConfig = channelOptions.ServiceConfig != null ? new ServiceConfig(channelOptions.ServiceConfig) : null;
+            ServiceConfig = channelOptions.ServiceConfig != null ? new GrpcServiceConfig(channelOptions.ServiceConfig) : null;
+            RetryThrottling = ServiceConfig?.RetryThrottling != null ? new ChannelRetryThrottling(ServiceConfig.RetryThrottling) : null;
             _serviceConfigMethods = (ServiceConfig != null) ? CreateServiceConfigMethods(ServiceConfig) : null;
 
             if (channelOptions.Credentials != null)
@@ -102,7 +107,7 @@ namespace Grpc.Net.Client
             }
         }
 
-        private static Dictionary<MethodKey, MethodConfig> CreateServiceConfigMethods(ServiceConfig serviceConfig)
+        private static Dictionary<MethodKey, MethodConfig> CreateServiceConfigMethods(GrpcServiceConfig serviceConfig)
         {
             var configs = new Dictionary<MethodKey, MethodConfig>();
             for (var i = 0; i < serviceConfig.MethodConfigs.Count; i++)

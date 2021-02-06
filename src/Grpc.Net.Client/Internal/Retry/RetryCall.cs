@@ -24,6 +24,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Grpc.Core;
+using Grpc.Net.Client.Configuration;
 using Microsoft.Extensions.Logging;
 
 namespace Grpc.Net.Client.Internal.Retry
@@ -36,7 +37,7 @@ namespace Grpc.Net.Client.Internal.Retry
         private const string LoggerName = "Grpc.Net.Client.Internal.RetryCall";
 
         private readonly ILogger _logger;
-        private readonly RetryThrottlingPolicy _retryThrottlingPolicy;
+        private readonly RetryPolicy _retryPolicy;
         private readonly GrpcChannel _channel;
         private readonly Method<TRequest, TResponse> _method;
         private readonly CallOptions _options;
@@ -103,10 +104,10 @@ namespace Grpc.Net.Client.Internal.Retry
             }
         }
 
-        public RetryCall(RetryThrottlingPolicy retryThrottlingPolicy, GrpcChannel channel, Method<TRequest, TResponse> method, CallOptions options)
+        public RetryCall(RetryPolicy retryPolicy, GrpcChannel channel, Method<TRequest, TResponse> method, CallOptions options)
         {
             _logger = channel.LoggerFactory.CreateLogger(LoggerName);
-            _retryThrottlingPolicy = retryThrottlingPolicy;
+            _retryPolicy = retryPolicy;
             _channel = channel;
             _method = method;
             _options = options;
@@ -115,32 +116,32 @@ namespace Grpc.Net.Client.Internal.Retry
             _attemptCount = 1;
             ActiveCall = HttpClientCallInvoker.CreateGrpcCall<TRequest, TResponse>(_channel, _method, _options);
 
-            ValidatePolicy(retryThrottlingPolicy);
+            ValidatePolicy(retryPolicy);
 
-            _nextRetryDelayMilliseconds = Convert.ToInt32(retryThrottlingPolicy.InitialBackoff.GetValueOrDefault().TotalMilliseconds);
+            _nextRetryDelayMilliseconds = Convert.ToInt32(retryPolicy.InitialBackoff.GetValueOrDefault().TotalMilliseconds);
         }
 
-        private void ValidatePolicy(RetryThrottlingPolicy retryThrottlingPolicy)
+        private void ValidatePolicy(RetryPolicy retryThrottlingPolicy)
         {
             if (retryThrottlingPolicy.MaxAttempts == null)
             {
-                throw CreateException(_method, RetryThrottlingPolicy.MaxAttemptsPropertyName);
+                throw CreateException(_method, RetryPolicy.MaxAttemptsPropertyName);
             }
             if (retryThrottlingPolicy.InitialBackoff == null)
             {
-                throw CreateException(_method, RetryThrottlingPolicy.InitialBackoffPropertyName);
+                throw CreateException(_method, RetryPolicy.InitialBackoffPropertyName);
             }
             if (retryThrottlingPolicy.MaxBackoff == null)
             {
-                throw CreateException(_method, RetryThrottlingPolicy.MaxBackoffPropertyName);
+                throw CreateException(_method, RetryPolicy.MaxBackoffPropertyName);
             }
             if (retryThrottlingPolicy.BackoffMultiplier == null)
             {
-                throw CreateException(_method, RetryThrottlingPolicy.BackoffMultiplierPropertyName);
+                throw CreateException(_method, RetryPolicy.BackoffMultiplierPropertyName);
             }
             if (retryThrottlingPolicy.RetryableStatusCodes.Count == 0)
             {
-                throw new InvalidOperationException($"Retry policy for '{_method.FullName}' must have property '{RetryThrottlingPolicy.RetryableStatusCodesPropertyName}' and must be non-empty.");
+                throw new InvalidOperationException($"Retry policy for '{_method.FullName}' must have property '{RetryPolicy.RetryableStatusCodesPropertyName}' and must be non-empty.");
             }
 
             static InvalidOperationException CreateException(IMethod method, string propertyName)
@@ -214,15 +215,20 @@ namespace Grpc.Net.Client.Internal.Retry
 
         private int CalculateNextRetryDelay()
         {
-            var nextMilliseconds = _nextRetryDelayMilliseconds * _retryThrottlingPolicy.BackoffMultiplier.GetValueOrDefault();
-            nextMilliseconds = Math.Min(nextMilliseconds, _retryThrottlingPolicy.MaxBackoff.GetValueOrDefault().TotalMilliseconds);
+            var nextMilliseconds = _nextRetryDelayMilliseconds * _retryPolicy.BackoffMultiplier.GetValueOrDefault();
+            nextMilliseconds = Math.Min(nextMilliseconds, _retryPolicy.MaxBackoff.GetValueOrDefault().TotalMilliseconds);
 
             return Convert.ToInt32(nextMilliseconds);
         }
 
         private RetryResult EvaluateRetry(Status status, int? retryPushbackMilliseconds)
         {
-            if (_attemptCount >= _retryThrottlingPolicy.MaxAttempts.GetValueOrDefault())
+            if (_channel.RetryThrottling?.IsRetryThrottlingActive() ?? false)
+            {
+                return RetryResult.Throttled;
+            }
+
+            if (_attemptCount >= _retryPolicy.MaxAttempts.GetValueOrDefault())
             {
                 return RetryResult.ExceededAttemptCount;
             }
@@ -246,7 +252,7 @@ namespace Grpc.Net.Client.Internal.Retry
                 return RetryResult.CallCommited;
             }
 
-            if (!_retryThrottlingPolicy.RetryableStatusCodes.Contains(status.StatusCode))
+            if (!_retryPolicy.RetryableStatusCodes.Contains(status.StatusCode))
             {
                 return RetryResult.NotRetryableStatusCode;
             }
@@ -260,7 +266,8 @@ namespace Grpc.Net.Client.Internal.Retry
             ExceededAttemptCount,
             CallCommited,
             NotRetryableStatusCode,
-            PushbackStop
+            PushbackStop,
+            Throttled
         }
 
         private static bool HasResponseHeaderStatus(GrpcCall<TRequest, TResponse> call)
@@ -281,12 +288,21 @@ namespace Grpc.Net.Client.Internal.Retry
                 if (status.StatusCode == StatusCode.OK)
                 {
                     // Success. Exit retry loop.
+                    _channel.RetryThrottling?.CallSuccess();
                     return;
                 }
 
                 try
                 {
                     var retryPushbackMS = GetRetryPushback();
+
+                    // Failures only could towards retry throttling if they have a known, retriable status.
+                    // This stops non-transient statuses, e.g. INVALID_ARGUMENT, from triggering throttling.
+                    if (_retryPolicy.RetryableStatusCodes.Contains(status.StatusCode) ||
+                        retryPushbackMS < 0)
+                    {
+                        _channel.RetryThrottling?.CallFailure();
+                    }
 
                     var result = EvaluateRetry(status, retryPushbackMS);
                     Log.RetryEvaluated(_logger, status.StatusCode, _attemptCount, result);

@@ -16,7 +16,7 @@
 
 #endregion
 
-namespace Grpc.Net.Client.Internal.ServiceConfig
+namespace Grpc.Net.Client.Internal.Config
 {
     internal interface IConfigValue
     {
