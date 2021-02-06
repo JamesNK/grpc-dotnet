@@ -18,101 +18,14 @@
 
 using System;
 using System.Collections.Generic;
-using Google.Protobuf.WellKnownTypes;
 using Grpc.Core;
-using Grpc.ServiceConfig;
 using NUnit.Framework;
-using GrpcMethodConfig = Grpc.ServiceConfig.MethodConfig;
-using GrpcServiceConfig = Grpc.ServiceConfig.ServiceConfig;
 
 namespace Grpc.Net.Client.Tests
 {
     [TestFixture]
     public class ServiceConfigTests
     {
-        [Test]
-        public void sdfsdfsdf()
-        {
-            var sc = new GrpcServiceConfig();
-            sc.RetryThrottling = new GrpcServiceConfig.Types.RetryThrottlingPolicy
-            {
-                
-            };
-            sc.MethodConfig.Add(new GrpcMethodConfig
-            {
-                Name =
-                {
-                    new GrpcMethodConfig.Types.Name { Method = "method2", Service = "service2" },
-                    new GrpcMethodConfig.Types.Name { Method = "method1", Service = "service1" }
-                },
-                RetryPolicy = new GrpcMethodConfig.Types.RetryPolicy
-                {
-                    InitialBackoff = Duration.FromTimeSpan(TimeSpan.FromSeconds(1)),
-                    MaxAttempts = 1,
-                    RetryableStatusCodes =
-                    {
-                        Google.Rpc.Code.Aborted
-                    }
-                }
-            });
-            sc.LoadBalancingConfig.Add(new LoadBalancingConfig
-            {
-                RoundRobin = new RoundRobinConfig
-                {
-                }
-            });
-            sc.MethodConfig.Add(new GrpcMethodConfig());
-            sc.HealthCheckConfig = new GrpcServiceConfig.Types.HealthCheckConfig
-            {
-                ServiceName = "blah"
-            };
-
-            var json = Google.Protobuf.JsonFormatter.Default.Format(sc);
-
-            Console.WriteLine(json);
-            //Grpc.ServiceConfig.ServiceConfig.Descriptor.
-
-            //Google.Protobuf.
-            //            Greet.
-            //global::Grpc.ServiceConfig.
-        }
-
-        /*
-{
-  "methodConfig": [
-    {
-      "name": [
-        {
-          "service": "service2",
-          "method": "method2"
-        },
-        {
-          "service": "service1",
-          "method": "method1"
-        }
-      ],
-      "retryPolicy": {
-        "maxAttempts": 1,
-        "initialBackoff": "1s",
-        "retryableStatusCodes": [
-          "ABORTED"
-        ]
-      }
-    },
-    {}
-  ],
-  "retryThrottling": {},
-  "loadBalancingConfig": [
-    {
-      "round_robin": {}
-    }
-  ],
-  "healthCheckConfig": {
-    "serviceName": "blah"
-  }
-}
-        */
-
         [Test]
         public void ServiceConfig_CreateUnderlyingConfig()
         {
