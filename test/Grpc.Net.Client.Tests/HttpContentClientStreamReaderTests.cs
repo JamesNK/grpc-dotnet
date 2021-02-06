@@ -236,7 +236,8 @@ namespace Grpc.Net.Client.Tests
                 ClientTestHelpers.ServiceMethod,
                 new GrpcMethodInfo(new GrpcCallScope(ClientTestHelpers.ServiceMethod.Type, uri), uri, methodConfig: null),
                 new CallOptions(),
-                channel);
+                channel,
+                previousAttempts: 0);
         }
 
         private static GrpcChannel CreateChannel(HttpClient httpClient, ILoggerFactory? loggerFactory = null, bool? throwOperationCanceledOnCancellation = null)

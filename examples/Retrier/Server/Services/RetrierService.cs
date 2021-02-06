@@ -28,7 +28,7 @@ namespace Server
 {
     public class RetrierService : Retrier.RetrierBase
     {
-        private const double DeliveryChance = 0.8;
+        private const double DeliveryChance = 0.5;
 
         private readonly Random _random = new Random();
         private readonly ILogger<RetrierService> _logger;
@@ -42,12 +42,12 @@ namespace Server
         {
             if (_random.NextDouble() > DeliveryChance)
             {
-                throw new RpcException(new Status(StatusCode.Unavailable, $"{request.Name} not delivered."));
+                throw new RpcException(new Status(StatusCode.Unavailable, $"- {request.Name}"));
             }
 
             return Task.FromResult(new PackageReceipt
             {
-                Message = $"{request.Name} successfully delivered."
+                Message = $"+ {request.Name}"
             });
         }
 

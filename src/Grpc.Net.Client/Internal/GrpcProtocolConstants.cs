@@ -40,8 +40,10 @@ namespace Grpc.Net.Client.Internal
         internal const string IdentityGrpcEncoding = "identity";
 
         internal const string MessageAcceptEncodingHeader = "grpc-accept-encoding";
-        internal const string RetryPushbackHeader = "grpc-retry-pushback-ms";
         internal const string CompressionRequestAlgorithmHeader = "grpc-internal-encoding-request";
+
+        internal const string RetryPushbackHeader = "grpc-retry-pushback-ms";
+        internal const string RetryPreviousAttemptsHeader = "grpc-previous-rpc-attempts";
 
         internal static readonly Dictionary<string, ICompressionProvider> DefaultCompressionProviders = new Dictionary<string, ICompressionProvider>(StringComparer.Ordinal)
         {

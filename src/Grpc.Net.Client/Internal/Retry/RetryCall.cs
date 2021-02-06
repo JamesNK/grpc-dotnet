@@ -114,7 +114,7 @@ namespace Grpc.Net.Client.Internal.Retry
             _writtenMessages = new List<ReadOnlyMemory<byte>>();
             _random = new Random();
             _attemptCount = 1;
-            ActiveCall = HttpClientCallInvoker.CreateGrpcCall<TRequest, TResponse>(_channel, _method, _options);
+            ActiveCall = HttpClientCallInvoker.CreateGrpcCall<TRequest, TResponse>(_channel, _method, _options, previousAttempts: 0);
 
             ValidatePolicy(retryPolicy);
 
@@ -150,9 +150,9 @@ namespace Grpc.Net.Client.Internal.Retry
             }
         }
 
-        private GrpcCall<TRequest, TResponse> CreateRetryCall(bool clientStreamCompleted)
+        private GrpcCall<TRequest, TResponse> CreateRetryCall(bool clientStreamCompleted, int previousAttempts)
         {
-            var call = HttpClientCallInvoker.CreateGrpcCall<TRequest, TResponse>(_channel, _method, _options);
+            var call = HttpClientCallInvoker.CreateGrpcCall<TRequest, TResponse>(_channel, _method, _options, previousAttempts);
             call.StartRetry(clientStreamCompleted, async requestStream =>
             {
                 Log.SendingBufferedMessages(_logger, _writtenMessages.Count);
@@ -334,9 +334,9 @@ namespace Grpc.Net.Client.Internal.Retry
                             ActiveCall.Dispose();
 
                             // Start new call.
-                            _attemptCount++;
                             _bufferedMessagesIndex = 0;
-                            ActiveCall = CreateRetryCall(ActiveCall.ClientStreamWriter?.CompleteTcs.Task.IsCompletedSuccessfully ?? false);
+                            ActiveCall = CreateRetryCall(ActiveCall.ClientStreamWriter?.CompleteCalled ?? false, _attemptCount);
+                            _attemptCount++;
 
                             // Signal any calls to public APIs (e.g. ResponseAsync, MoveNext, WriteAsync)
                             // that have thrown and are caught in catch blocks and are waiting for the call to retry.

@@ -19,6 +19,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Threading;
@@ -42,6 +43,9 @@ namespace Grpc.Net.Client.Tests
             // Arrange
             HttpContent? content = null;
 
+            bool? firstRequestPreviousAttemptsHeader = null;
+            string? secondRequestPreviousAttemptsHeaderValue = null;
+
             var callCount = 0;
             var httpClient = ClientTestHelpers.CreateTestClient(async request =>
             {
@@ -50,15 +54,18 @@ namespace Grpc.Net.Client.Tests
 
                 if (callCount == 1)
                 {
+                    firstRequestPreviousAttemptsHeader = request.Headers.TryGetValues(GrpcProtocolConstants.RetryPreviousAttemptsHeader, out _);
+
                     await content.CopyToAsync(new MemoryStream());
                     return ResponseUtils.CreateHeadersOnlyResponse(HttpStatusCode.OK, StatusCode.Unavailable);
                 }
 
-                var reply = new HelloReply
+                if (request.Headers.TryGetValues(GrpcProtocolConstants.RetryPreviousAttemptsHeader, out var retryAttemptCountValue))
                 {
-                    Message = "Hello world"
-                };
+                    secondRequestPreviousAttemptsHeaderValue = retryAttemptCountValue.Single();
+                }
 
+                var reply = new HelloReply { Message = "Hello world" };
                 var streamContent = await ClientTestHelpers.CreateResponseContent(reply).DefaultTimeout();
 
                 return ResponseUtils.CreateResponse(HttpStatusCode.OK, streamContent);
@@ -72,6 +79,7 @@ namespace Grpc.Net.Client.Tests
             // Assert
             Assert.AreEqual(2, callCount);
             Assert.AreEqual("Hello world", (await call.ResponseAsync.DefaultTimeout()).Message);
+            Assert.AreEqual("1", (await call.ResponseHeadersAsync.DefaultTimeout()).GetValue(GrpcProtocolConstants.RetryPreviousAttemptsHeader));
 
             Assert.IsNotNull(content);
 
@@ -79,6 +87,9 @@ namespace Grpc.Net.Client.Tests
             var requestMessage = await ReadRequestMessage(requestContent).DefaultTimeout();
 
             Assert.AreEqual("World", requestMessage!.Name);
+
+            Assert.IsFalse(firstRequestPreviousAttemptsHeader);
+            Assert.AreEqual("1", secondRequestPreviousAttemptsHeaderValue);
         }
 
         [Test]
@@ -312,11 +323,11 @@ namespace Grpc.Net.Client.Tests
             var invoker = HttpClientCallInvokerFactory.Create(httpClient, serviceConfig: serviceConfig);
 
             // Act
-            var rs = await invoker.AsyncUnaryCall<HelloRequest, HelloReply>(ClientTestHelpers.ServiceMethod, string.Empty, new CallOptions(), new HelloRequest { Name = "World" });
+            var call = invoker.AsyncUnaryCall<HelloRequest, HelloReply>(ClientTestHelpers.ServiceMethod, string.Empty, new CallOptions(), new HelloRequest { Name = "World" });
 
             // Assert
             Assert.AreEqual(1, callCount);
-            Assert.AreEqual("Hello world", rs.Message);
+            Assert.AreEqual("Hello world", (await call.ResponseAsync.DefaultTimeout()).Message);
         }
 
         [Test]

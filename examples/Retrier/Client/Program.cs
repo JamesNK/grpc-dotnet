@@ -23,6 +23,7 @@ using Grpc.Net.Client;
 using System.Collections.Generic;
 using Grpc.Core;
 using Microsoft.Extensions.Logging;
+using Grpc.Net.Client.Configuration;
 
 namespace Client
 {
@@ -33,8 +34,8 @@ namespace Client
             using var channel = CreateChannel();
             var client = new Retrier.RetrierClient(channel);
 
-            await UnaryRetry(client);
-            //await ServerStreamingRetry(client);
+            //await UnaryRetry(client);
+            await ServerStreamingRetry(client);
 
             Console.WriteLine("Shutting down");
             Console.WriteLine("Press any key to exit...");
@@ -47,19 +48,31 @@ namespace Client
             {
                 try
                 {
-                    var receipt = await client.DeliverPackageAsync(new PackageMessage { Name = product });
+                    var call = client.DeliverPackageAsync(new PackageMessage { Name = product });
+                    var receipt = await call;
+
                     Console.ForegroundColor = ConsoleColor.Green;
-                    Console.WriteLine(receipt.Message);
+                    Console.Write(receipt.Message);
+                    Console.ResetColor();
+                    Console.Write(" " + await GetRetryCount(call));
+                    Console.WriteLine();
                 }
                 catch (RpcException ex)
                 {
                     Console.ForegroundColor = ConsoleColor.Red;
                     Console.WriteLine(ex.Status.Detail);
+                    Console.ResetColor();
                 }
 
-                Console.ResetColor();
                 await Task.Delay(200);
             }
+        }
+
+        private static async Task<string> GetRetryCount(AsyncUnaryCall<PackageReceipt> call)
+        {
+            var headers = await call.ResponseHeadersAsync;
+            var previousAttemptCount = headers.GetValue("grpc-previous-rpc-attempts");
+            return previousAttemptCount != null ? $"(retry count: {previousAttemptCount})" : string.Empty;
         }
 
         private static async Task ServerStreamingRetry(Retrier.RetrierClient client)
@@ -69,7 +82,7 @@ namespace Client
             try
             {
                 Products.Clear();
-                for (int i = 0; i < 20; i++)
+                for (int i = 0; i < 5; i++)
                 {
                     Products.Add(((char)('a' + i)).ToString());
                 }
@@ -114,12 +127,12 @@ namespace Client
                         new MethodConfig
                         {
                             Names = { Name.All },
-                            RetryPolicy = new RetryThrottlingPolicy
+                            RetryPolicy = new RetryPolicy
                             {
-                                MaxAttempts = 5,
-                                InitialBackoff = TimeSpan.FromSeconds(5),
-                                BackoffMultiplier = 1,
-                                MaxBackoff = TimeSpan.FromSeconds(5),
+                                MaxAttempts = 100,
+                                InitialBackoff = TimeSpan.FromSeconds(0.5),
+                                BackoffMultiplier = 2,
+                                MaxBackoff = TimeSpan.FromSeconds(1),
                                 RetryableStatusCodes = { StatusCode.Unavailable }
                             }
                         }

@@ -130,7 +130,7 @@ namespace Grpc.Net.Client.Internal
             if (retryPolicy == null)
             {
                 // No retry/hedge policy configured. Fast path!
-                return CreateGrpcCall<TRequest, TResponse>(channel, method, options);
+                return CreateGrpcCall<TRequest, TResponse>(channel, method, options, previousAttempts: 0);
             }
             else
             {
@@ -141,7 +141,8 @@ namespace Grpc.Net.Client.Internal
         public static GrpcCall<TRequest, TResponse> CreateGrpcCall<TRequest, TResponse>(
             GrpcChannel channel,
             Method<TRequest, TResponse> method,
-            CallOptions options)
+            CallOptions options,
+            int previousAttempts)
             where TRequest : class
             where TResponse : class
         {
@@ -151,7 +152,7 @@ namespace Grpc.Net.Client.Internal
             }
 
             var methodInfo = channel.GetCachedGrpcMethodInfo(method);
-            var call = new GrpcCall<TRequest, TResponse>(method, methodInfo, options, channel);
+            var call = new GrpcCall<TRequest, TResponse>(method, methodInfo, options, channel, previousAttempts);
 
             return call;
         }

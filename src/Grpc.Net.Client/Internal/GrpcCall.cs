@@ -21,6 +21,7 @@ using System.Buffers;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
+using System.Globalization;
 using System.IO;
 using System.Net;
 using System.Net.Http;
@@ -43,6 +44,7 @@ namespace Grpc.Net.Client.Internal
         private readonly TaskCompletionSource<Status> _callTcs;
         private readonly DateTime _deadline;
         private readonly GrpcMethodInfo _grpcMethodInfo;
+        private readonly int _previousAttempts;
 
         private Task<HttpResponseMessage>? _httpResponseTask;
         private Task<Metadata>? _responseHeadersTask;
@@ -54,10 +56,11 @@ namespace Grpc.Net.Client.Internal
 
         // These are set depending on the type of gRPC call
         private TaskCompletionSource<TResponse>? _responseTcs;
+
         public HttpContentClientStreamWriter<TRequest, TResponse>? ClientStreamWriter { get; private set; }
         public HttpContentClientStreamReader<TRequest, TResponse>? ClientStreamReader { get; private set; }
 
-        public GrpcCall(Method<TRequest, TResponse> method, GrpcMethodInfo grpcMethodInfo, CallOptions options, GrpcChannel channel)
+        public GrpcCall(Method<TRequest, TResponse> method, GrpcMethodInfo grpcMethodInfo, CallOptions options, GrpcChannel channel, int previousAttempts)
             : base(options, channel)
         {
             // Validate deadline before creating any objects that require cleanup
@@ -69,6 +72,7 @@ namespace Grpc.Net.Client.Internal
             Method = method;
             _grpcMethodInfo = grpcMethodInfo;
             _deadline = options.Deadline ?? DateTime.MaxValue;
+            _previousAttempts = previousAttempts;
 
             Channel.RegisterActiveCall(this);
         }
@@ -316,7 +320,15 @@ namespace Grpc.Net.Client.Internal
                     await CallTask.ConfigureAwait(false);
                 }
 
-                return GrpcProtocolHelpers.BuildMetadata(httpResponse.Headers);
+                var metadata = GrpcProtocolHelpers.BuildMetadata(httpResponse.Headers);
+                
+                // https://github.com/grpc/proposal/blob/master/A6-client-retries.md#exposed-retry-metadata
+                if (_previousAttempts > 0)
+                {
+                    metadata.Add(GrpcProtocolConstants.RetryPreviousAttemptsHeader, _previousAttempts.ToString(CultureInfo.InvariantCulture));
+                }
+
+                return metadata;
             }
             catch (Exception ex) when (ResolveException(ErrorStartingCallMessage, ex, out _, out var resolvedException))
             {
@@ -869,6 +881,12 @@ namespace Grpc.Net.Client.Internal
             // A missing TE header results in servers aborting the gRPC call.
             headers.TryAddWithoutValidation(GrpcProtocolConstants.TEHeader, GrpcProtocolConstants.TEHeaderValue);
             headers.TryAddWithoutValidation(GrpcProtocolConstants.MessageAcceptEncodingHeader, Channel.MessageAcceptEncoding);
+
+            // https://github.com/grpc/proposal/blob/master/A6-client-retries.md#exposed-retry-metadata
+            if (_previousAttempts > 0)
+            {
+                headers.TryAddWithoutValidation(GrpcProtocolConstants.RetryPreviousAttemptsHeader, _previousAttempts.ToString(CultureInfo.InvariantCulture));
+            }
 
             if (Options.Headers != null && Options.Headers.Count > 0)
             {
