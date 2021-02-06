@@ -47,7 +47,7 @@ namespace Grpc.Net.Client
 
     public sealed class Name : ConfigObject
     {
-        public static readonly Name AllServices = new Name(new ReadOnlyDictionary<string, object>(new Dictionary<string, object>()));
+        public static readonly Name All = new Name(new ReadOnlyDictionary<string, object>(new Dictionary<string, object>()));
 
         private const string ServicePropertyName = "service";
         private const string MethodPropertyName = "method";

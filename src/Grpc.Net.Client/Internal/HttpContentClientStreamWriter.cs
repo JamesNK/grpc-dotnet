@@ -36,7 +36,6 @@ namespace Grpc.Net.Client.Internal
         private readonly ILogger _logger;
         private readonly object _writeLock;
         private Task? _writeTask;
-        private bool _completeCalled;
 
         public TaskCompletionSource<Stream> WriteStreamTcs { get; }
         public TaskCompletionSource<bool> CompleteTcs { get; }
@@ -53,6 +52,7 @@ namespace Grpc.Net.Client.Internal
         }
 
         public WriteOptions WriteOptions { get; set; }
+        public bool CompleteCalled { get; set; }
 
         public Task CompleteAsync()
         {
@@ -74,7 +74,7 @@ namespace Grpc.Net.Client.Internal
 
                     // Notify that the client stream is complete
                     CompleteTcs.TrySetResult(true);
-                    _completeCalled = true;
+                    CompleteCalled = true;
                 }
             }
 
@@ -88,6 +88,16 @@ namespace Grpc.Net.Client.Internal
                 throw new ArgumentNullException(nameof(message));
             }
 
+            return WriteAsync(WriteMessageToStream, message);
+
+            static ValueTask WriteMessageToStream(GrpcCall<TRequest, TResponse> call, Stream writeStream, CallOptions callOptions, TRequest message)
+            {
+                return call.WriteMessageAsync(writeStream, message, callOptions);
+            }
+        }
+
+        public Task WriteAsync<TState>(Func<GrpcCall<TRequest, TResponse>, Stream, CallOptions, TState, ValueTask> writeFunc, TState state)
+        {
             _call.EnsureNotDisposed();
 
             lock (_writeLock)
@@ -96,7 +106,7 @@ namespace Grpc.Net.Client.Internal
                 {
                     // CompleteAsync has already been called
                     // Use explicit flag here. This error takes precedence over others.
-                    if (_completeCalled)
+                    if (CompleteCalled)
                     {
                         return CreateErrorTask("Request stream has already been completed.");
                     }
@@ -122,7 +132,7 @@ namespace Grpc.Net.Client.Internal
                     }
 
                     // Save write task to track whether it is complete. Must be set inside lock.
-                    _writeTask = WriteAsyncCore(message);
+                    _writeTask = WriteAsyncCore(writeFunc, state);
                 }
             }
 
@@ -142,32 +152,7 @@ namespace Grpc.Net.Client.Internal
 
         public GrpcCall<TRequest, TResponse> Call => _call;
 
-        public async Task WriteAsyncCore(ReadOnlyMemory<byte> message, Stream writeStream)
-        {
-            try
-            {
-                // WriteOptions set on the writer take precedence over the CallOptions.WriteOptions
-                var callOptions = _call.Options;
-                if (WriteOptions != null)
-                {
-                    // Creates a copy of the struct
-                    callOptions = callOptions.WithWriteOptions(WriteOptions);
-                }
-
-                await _call.WriteMessageAsync(writeStream, message, callOptions).ConfigureAwait(false);
-
-                // Flush stream to ensure messages are sent immediately
-                await writeStream.FlushAsync(callOptions.CancellationToken).ConfigureAwait(false);
-
-                GrpcEventSource.Log.MessageSent();
-            }
-            catch (OperationCanceledException) when (!_call.Channel.ThrowOperationCanceledOnCancellation)
-            {
-                throw _call.CreateCanceledStatusException();
-            }
-        }
-
-        private async Task WriteAsyncCore(TRequest message)
+        public async Task WriteAsyncCore<TState>(Func<GrpcCall<TRequest, TResponse>, Stream, CallOptions, TState, ValueTask> writeFunc, TState state)
         {
             try
             {
@@ -182,7 +167,7 @@ namespace Grpc.Net.Client.Internal
                     callOptions = callOptions.WithWriteOptions(WriteOptions);
                 }
 
-                await _call.WriteMessageAsync(writeStream, message, callOptions).ConfigureAwait(false);
+                await writeFunc(_call, writeStream, callOptions, state).ConfigureAwait(false);
 
                 // Flush stream to ensure messages are sent immediately
                 await writeStream.FlushAsync(callOptions.CancellationToken).ConfigureAwait(false);

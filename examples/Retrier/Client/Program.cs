@@ -22,6 +22,7 @@ using Retry;
 using Grpc.Net.Client;
 using System.Collections.Generic;
 using Grpc.Core;
+using Microsoft.Extensions.Logging;
 
 namespace Client
 {
@@ -32,8 +33,8 @@ namespace Client
             using var channel = CreateChannel();
             var client = new Retrier.RetrierClient(channel);
 
-            //await UnaryRetry(client);
-            await ServerStreamingRetry(client);
+            await UnaryRetry(client);
+            //await ServerStreamingRetry(client);
 
             Console.WriteLine("Shutting down");
             Console.WriteLine("Press any key to exit...");
@@ -79,7 +80,7 @@ namespace Client
                     Console.WriteLine("Sending " + product);
                     await call.RequestStream.WriteAsync(new PackageMessage { Name = product });
 
-                    await Task.Delay(200);
+                    await Task.Delay(1000);
                 }
 
                 await call.RequestStream.CompleteAsync();
@@ -99,6 +100,11 @@ namespace Client
 
         private static GrpcChannel CreateChannel()
         {
+            var factory = Microsoft.Extensions.Logging.LoggerFactory.Create(builder =>
+            {
+                builder.AddConsole();
+                builder.SetMinimumLevel(LogLevel.None);
+            });
             var options = new GrpcChannelOptions
             {
                 ServiceConfig = new ServiceConfig
@@ -107,18 +113,19 @@ namespace Client
                     {
                         new MethodConfig
                         {
-                            Names = { Name.AllServices },
+                            Names = { Name.All },
                             RetryPolicy = new RetryThrottlingPolicy
                             {
-                                MaxAttempts = 100,
-                                InitialBackoff = TimeSpan.FromSeconds(1),
+                                MaxAttempts = 5,
+                                InitialBackoff = TimeSpan.FromSeconds(5),
                                 BackoffMultiplier = 1,
-                                MaxBackoff = TimeSpan.FromSeconds(1),
+                                MaxBackoff = TimeSpan.FromSeconds(5),
                                 RetryableStatusCodes = { StatusCode.Unavailable }
                             }
                         }
                     }
-                }
+                },
+                LoggerFactory = factory
             };
             return GrpcChannel.ForAddress("http://localhost:5000", options);
         }

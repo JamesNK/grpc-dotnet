@@ -206,10 +206,10 @@ namespace Grpc.Net.Client.Tests
         }
 
         [Test]
-        public void Name_AllServicesIsReadOnly_ErrorOnChange()
+        public void Name_All_ErrorOnChange()
         {
             // Arrange & Act & Assert
-            Assert.Throws<NotSupportedException>(() => Name.AllServices.Method = "This will break");
+            Assert.Throws<NotSupportedException>(() => Name.All.Method = "This will break");
         }
     }
 }

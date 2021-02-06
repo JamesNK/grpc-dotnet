@@ -24,45 +24,22 @@ using System.Threading.Tasks;
 
 namespace Grpc.Net.Client.Internal
 {
+    // TODO: Still need generic args?
     internal class PushUnaryContent<TRequest, TResponse> : HttpContent
         where TRequest : class
         where TResponse : class
     {
-        private readonly TRequest? _content;
-        private readonly ReadOnlyMemory<byte> _data;
-        private readonly GrpcCall<TRequest, TResponse> _call;
+        private readonly Func<Stream, ValueTask> _startCallback;
 
-        public PushUnaryContent(TRequest content, GrpcCall<TRequest, TResponse> call) : this(call)
+        public PushUnaryContent(Func<Stream, ValueTask> startCallback)
         {
-            _content = content;
-        }
-
-        public PushUnaryContent(ReadOnlyMemory<byte> data, GrpcCall<TRequest, TResponse> call) : this(call)
-        {
-            _data = data;
-        }
-
-        private PushUnaryContent(GrpcCall<TRequest, TResponse> call)
-        {
-            _call = call;
+            _startCallback = startCallback;
             Headers.ContentType = GrpcProtocolConstants.GrpcContentTypeHeaderValue;
         }
 
         protected override Task SerializeToStreamAsync(Stream stream, TransportContext? context)
         {
-            ValueTask writeMessageTask;
-            if (_content != null)
-            {
-                if (_call.StreamWrapper != null)
-                {
-                    stream = _call.StreamWrapper(stream);
-                }
-                writeMessageTask = _call.WriteMessageAsync(stream, _content, _call.Options);
-            }
-            else
-            {
-                writeMessageTask = _call.WriteMessageAsync(stream, _data, _call.Options);
-            }
+            var writeMessageTask = _startCallback(stream);
             if (writeMessageTask.IsCompletedSuccessfully)
             {
                 GrpcEventSource.Log.MessageSent();

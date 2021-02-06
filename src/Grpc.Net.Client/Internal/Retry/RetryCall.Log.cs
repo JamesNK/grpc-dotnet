@@ -20,7 +20,7 @@ using System;
 using Grpc.Core;
 using Microsoft.Extensions.Logging;
 
-namespace Grpc.Net.Client.Internal
+namespace Grpc.Net.Client.Internal.Retry
 {
     internal partial class RetryCall<TRequest, TResponse> : IGrpcCall<TRequest, TResponse>
         where TRequest : class
@@ -40,6 +40,9 @@ namespace Grpc.Net.Client.Internal
             private static readonly Action<ILogger, Exception> _errorRetryingCall =
                 LoggerMessage.Define(LogLevel.Error, new EventId(4, "ErrorRetryingCall"), "Error retrying gRPC call.");
 
+            private static readonly Action<ILogger, int, Exception?> _sendingBufferedMessages =
+                LoggerMessage.Define<int>(LogLevel.Trace, new EventId(5, "SendingBufferedMessages"), "Sending {MessageCount} buffered messages from previous failed gRPC calls.");
+
             internal static void RetryEvaluated(ILogger logger, StatusCode statusCode, int attemptCount, RetryResult result)
             {
                 _retryEvaluated(logger, statusCode, attemptCount, result, null);
@@ -58,6 +61,11 @@ namespace Grpc.Net.Client.Internal
             internal static void ErrorRetryingCall(ILogger logger, Exception ex)
             {
                 _errorRetryingCall(logger, ex);
+            }
+
+            internal static void SendingBufferedMessages(ILogger logger, int messageCount)
+            {
+                _sendingBufferedMessages(logger, messageCount, null);
             }
         }
     }

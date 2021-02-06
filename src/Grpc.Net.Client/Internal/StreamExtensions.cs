@@ -286,7 +286,7 @@ namespace Grpc.Net.Client
             this Stream stream,
             GrpcCall call,
             ReadOnlyMemory<byte> data,
-            CallOptions callOptions)
+            CancellationToken cancellationToken)
         {
             try
             {
@@ -294,7 +294,7 @@ namespace Grpc.Net.Client
 
                 // Sending the header+content in a single WriteAsync call has significant performance benefits
                 // https://github.com/dotnet/runtime/issues/35184#issuecomment-626304981
-                await stream.WriteAsync(data, callOptions.CancellationToken).ConfigureAwait(false);
+                await stream.WriteAsync(data, cancellationToken).ConfigureAwait(false);
 
                 GrpcCallLog.MessageSent(call.Logger);
             }

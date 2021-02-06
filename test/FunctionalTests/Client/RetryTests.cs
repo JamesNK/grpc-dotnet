@@ -76,7 +76,7 @@ namespace Grpc.AspNetCore.FunctionalTests.Client
             for (int i = 0; i < 20; i++)
             {
                 await call.RequestStream.WriteAsync(new DataMessage { Data = ByteString.CopyFrom(new byte[] { (byte)i }) }).DefaultTimeout();
-                await Task.Delay(200);
+                await Task.Delay(1);
             }
 
             await call.RequestStream.CompleteAsync().DefaultTimeout();
@@ -132,7 +132,7 @@ namespace Grpc.AspNetCore.FunctionalTests.Client
                 {
                     new MethodConfig
                     {
-                        Names = { Name.AllServices },
+                        Names = { Name.All },
                         RetryPolicy = new RetryThrottlingPolicy
                         {
                             MaxAttempts = maxAttempts ?? 5,

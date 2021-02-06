@@ -322,19 +322,17 @@ namespace Grpc.Net.Client.Tests
         public async Task AsyncClientStreamingCall_SuccessAfterRetry_RequestContentSent()
         {
             // Arrange
-            PushStreamContent<HelloRequest, HelloReply>? content = null;
+            var requestContent = new MemoryStream();
 
             var callCount = 0;
             var httpClient = ClientTestHelpers.CreateTestClient(async request =>
             {
                 callCount++;
 
-                content = (PushStreamContent<HelloRequest, HelloReply>)request.Content!;
-                await content.PushComplete.DefaultTimeout();
+                await request.Content!.CopyToAsync(requestContent);
 
                 if (callCount == 1)
                 {
-                    await content.CopyToAsync(new MemoryStream());
                     return ResponseUtils.CreateHeadersOnlyResponse(HttpStatusCode.OK, StatusCode.Unavailable);
                 }
 
@@ -351,12 +349,10 @@ namespace Grpc.Net.Client.Tests
 
             // Assert
             Assert.IsNotNull(call);
-            Assert.IsNotNull(content);
 
             var responseTask = call.ResponseAsync;
             Assert.IsFalse(responseTask.IsCompleted, "Response not returned until client stream is complete.");
 
-            var streamTask = content!.ReadAsStreamAsync().DefaultTimeout();
 
             await call.RequestStream.WriteAsync(new HelloRequest { Name = "1" }).DefaultTimeout();
             await call.RequestStream.WriteAsync(new HelloRequest { Name = "2" }).DefaultTimeout();
@@ -366,7 +362,8 @@ namespace Grpc.Net.Client.Tests
             var responseMessage = await responseTask.DefaultTimeout();
             Assert.AreEqual("Hello world", responseMessage.Message);
 
-            var requestContent = await streamTask.DefaultTimeout();
+            requestContent.Seek(0, SeekOrigin.Begin);
+
             var requestMessage = await ReadRequestMessage(requestContent).DefaultTimeout();
             Assert.AreEqual("1", requestMessage!.Name);
             requestMessage = await ReadRequestMessage(requestContent).DefaultTimeout();
@@ -615,7 +612,7 @@ namespace Grpc.Net.Client.Tests
                 {
                     new MethodConfig
                     {
-                        Names = { Name.AllServices },
+                        Names = { Name.All },
                         RetryPolicy = new RetryThrottlingPolicy
                         {
                             MaxAttempts = maxAttempts ?? 5,

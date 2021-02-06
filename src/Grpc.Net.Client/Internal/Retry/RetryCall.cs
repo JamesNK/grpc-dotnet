@@ -26,7 +26,7 @@ using System.Threading.Tasks;
 using Grpc.Core;
 using Microsoft.Extensions.Logging;
 
-namespace Grpc.Net.Client.Internal
+namespace Grpc.Net.Client.Internal.Retry
 {
     internal partial class RetryCall<TRequest, TResponse> : IGrpcCall<TRequest, TResponse>
         where TRequest : class
@@ -45,128 +45,61 @@ namespace Grpc.Net.Client.Internal
         private readonly object _lock = new object();
         private readonly CancellationTokenSource _retryCts = new CancellationTokenSource();
 
+        private int _bufferedMessagesIndex;
         private int _attemptCount;
         private int _nextRetryDelayMilliseconds;
-        private GrpcCall<TRequest, TResponse> _call;
-        private RetryClientStreamReader? _retryClientStreamReader;
-        private RetryClientStreamWriter? _retryClientStreamWriter;
+        private RetryClientStreamReader<TRequest, TResponse>? _retryClientStreamReader;
+        private RetryClientStreamWriter<TRequest, TResponse>? _retryClientStreamWriter;
         private TaskCompletionSource<bool> _canRetryTcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        public IClientStreamWriter<TRequest>? ClientStreamWriter
-        {
-            get
-            {
-                if (_retryClientStreamWriter == null)
-                {
-                    _retryClientStreamWriter = new RetryClientStreamWriter(this);
-                }
+        public bool BufferedCurrentMessage { get; set; }
+        public GrpcCall<TRequest, TResponse> ActiveCall { get; private set; }
+        public IClientStreamWriter<TRequest>? ClientStreamWriter => _retryClientStreamWriter ??= new RetryClientStreamWriter<TRequest, TResponse>(this);
+        public IAsyncStreamReader<TResponse>? ClientStreamReader => _retryClientStreamReader ??= new RetryClientStreamReader<TRequest, TResponse>(this);
 
-                return _retryClientStreamWriter;
+        public async ValueTask WriteNewMessage(GrpcCall<TRequest, TResponse> call, Stream writeStream, CallOptions callOptions, TRequest message)
+        {
+            // Serialize current message and add to the buffer.
+            if (!BufferedCurrentMessage)
+            {
+                var payload = SerializePayload(call, callOptions, message);
+                _writtenMessages.Add(payload);
+                BufferedCurrentMessage = true;
+            }
+
+            await WriteBufferedMessages(writeStream, callOptions.CancellationToken).ConfigureAwait(false);
+        }
+
+        private byte[] SerializePayload(GrpcCall<TRequest, TResponse> call, CallOptions callOptions, TRequest request)
+        {
+            var serializationContext = call.SerializationContext;
+            serializationContext.CallOptions = callOptions;
+            serializationContext.Initialize();
+
+            try
+            {
+                call.Method.RequestMarshaller.ContextualSerializer(request, serializationContext);
+
+                if (!serializationContext.TryGetPayload(out var payload))
+                {
+                    throw new Exception();
+                }
+                return payload.ToArray();
+            }
+            finally
+            {
+                serializationContext.Reset();
             }
         }
 
-        public IAsyncStreamReader<TResponse>? ClientStreamReader
+        internal async ValueTask WriteBufferedMessages(Stream writeStream, CancellationToken cancellationToken)
         {
-            get
+            while (_bufferedMessagesIndex < _writtenMessages.Count)
             {
-                if (_retryClientStreamReader == null)
-                {
-                    _retryClientStreamReader = new RetryClientStreamReader(this);
-                }
+                var writtenMessage = _writtenMessages[_bufferedMessagesIndex];
 
-                return _retryClientStreamReader;
-            }
-        }
-
-        private class RetryClientStreamWriter : IClientStreamWriter<TRequest>
-        {
-            private readonly RetryCall<TRequest, TResponse> _retryCall;
-
-            public RetryClientStreamWriter(RetryCall<TRequest, TResponse> retryCall)
-            {
-                _retryCall = retryCall;
-                WriteOptions = retryCall._call.Options.WriteOptions;
-            }
-
-            public WriteOptions WriteOptions { get; set; }
-
-            public async Task CompleteAsync()
-            {
-                while (true)
-                {
-                    GrpcCall<TRequest, TResponse> call = _retryCall._call;
-                    try
-                    {
-                        await call.ClientStreamWriter!.CompleteAsync().ConfigureAwait(false);
-                        return;
-                    }
-                    catch
-                    {
-                        if (!await _retryCall.ResolveRetryTask(call).ConfigureAwait(false))
-                        {
-                            throw;
-                        }
-                    }
-                }
-            }
-
-            public async Task WriteAsync(TRequest message)
-            {
-                while (true)
-                {
-                    GrpcCall<TRequest, TResponse> call = _retryCall._call;
-                    try
-                    {
-                        var writer = call.ClientStreamWriter!;
-                        writer.WriteOptions = WriteOptions;
-
-                        await writer.WriteAsync(message).ConfigureAwait(false);
-                        return;
-                    }
-                    catch
-                    {
-                        if (!await _retryCall.ResolveRetryTask(call).ConfigureAwait(false))
-                        {
-                            throw;
-                        }
-                    }
-                }
-            }
-        }
-
-        private class RetryClientStreamReader : IAsyncStreamReader<TResponse>
-        {
-            private readonly RetryCall<TRequest, TResponse> _retryCall;
-
-            public RetryClientStreamReader(RetryCall<TRequest, TResponse> retryCall)
-            {
-                _retryCall = retryCall;
-            }
-
-            // Suppress warning when overriding interface definition
-#pragma warning disable CS8613, CS8766 // Nullability of reference types in return type doesn't match implicitly implemented member.
-            public TResponse? Current => InnerReader.Current;
-#pragma warning restore CS8613, CS8766 // Nullability of reference types in return type doesn't match implicitly implemented member.
-
-            private HttpContentClientStreamReader<TRequest, TResponse> InnerReader => _retryCall._call.ClientStreamReader!;
-
-            public async Task<bool> MoveNext(CancellationToken cancellationToken)
-            {
-                while (true)
-                {
-                    GrpcCall<TRequest, TResponse> call = _retryCall._call;
-                    try
-                    {
-                        return await call.ClientStreamReader!.MoveNext(cancellationToken).ConfigureAwait(false);
-                    }
-                    catch
-                    {
-                        if (!await _retryCall.ResolveRetryTask(call).ConfigureAwait(false))
-                        {
-                            throw;
-                        }
-                    }
-                }
+                await ActiveCall.WriteMessageAsync(writeStream, writtenMessage, cancellationToken).ConfigureAwait(false);
+                _bufferedMessagesIndex++;
             }
         }
 
@@ -180,8 +113,7 @@ namespace Grpc.Net.Client.Internal
             _writtenMessages = new List<ReadOnlyMemory<byte>>();
             _random = new Random();
             _attemptCount = 1;
-            _call = HttpClientCallInvoker.CreateGrpcCall<TRequest, TResponse>(_channel, _method, _options);
-            _call.StreamWrapper = output => new RetryCaptureStream(output, _writtenMessages);
+            ActiveCall = HttpClientCallInvoker.CreateGrpcCall<TRequest, TResponse>(_channel, _method, _options);
 
             ValidatePolicy(retryThrottlingPolicy);
 
@@ -220,7 +152,17 @@ namespace Grpc.Net.Client.Internal
         private GrpcCall<TRequest, TResponse> CreateRetryCall(bool clientStreamCompleted)
         {
             var call = HttpClientCallInvoker.CreateGrpcCall<TRequest, TResponse>(_channel, _method, _options);
-            call.StartRetry(_writtenMessages, clientStreamCompleted);
+            call.StartRetry(clientStreamCompleted, async requestStream =>
+            {
+                Log.SendingBufferedMessages(_logger, _writtenMessages.Count);
+
+                await WriteBufferedMessages(requestStream, ActiveCall.CancellationToken).ConfigureAwait(false);
+
+                if (clientStreamCompleted)
+                {
+                    await call.ClientStreamWriter!.CompleteAsync().ConfigureAwait(false);
+                }
+            });
 
             return call;
         }
@@ -229,7 +171,7 @@ namespace Grpc.Net.Client.Internal
         {
             while (true)
             {
-                GrpcCall<TRequest, TResponse> call = _call;
+                GrpcCall<TRequest, TResponse> call = ActiveCall;
                 try
                 {
                     return await call.GetResponseAsync().ConfigureAwait(false);
@@ -244,13 +186,13 @@ namespace Grpc.Net.Client.Internal
             }
         }
 
-        private async Task<bool> ResolveRetryTask(GrpcCall<TRequest, TResponse> call)
+        public async Task<bool> ResolveRetryTask(GrpcCall<TRequest, TResponse> call)
         {
             Task<bool> canRetryTask;
             lock (_lock)
             {
                 // New call has already been made
-                if (call != _call)
+                if (call != ActiveCall)
                 {
                     return true;
                 }
@@ -263,7 +205,7 @@ namespace Grpc.Net.Client.Internal
             if (canRetry)
             {
                 // Verify a new call has been made
-                Debug.Assert(call != _call);
+                Debug.Assert(call != ActiveCall);
                 return true;
             }
 
@@ -297,7 +239,7 @@ namespace Grpc.Net.Client.Internal
                 }
             }
 
-            if (!HasResponseHeaderStatus(_call))
+            if (!HasResponseHeaderStatus(ActiveCall))
             {
                 // If a HttpResponse has been received and it's not a "trailers only" response (contains status in header)
                 // then headers were returned before failure. The call is commited and can't be retried.
@@ -335,7 +277,7 @@ namespace Grpc.Net.Client.Internal
             // 3. If it can be retried then start a new active call and begin again.
             while (true)
             {
-                var status = await _call.CallTask.ConfigureAwait(false);
+                var status = await ActiveCall.CallTask.ConfigureAwait(false);
                 if (status.StatusCode == StatusCode.OK)
                 {
                     // Success. Exit retry loop.
@@ -373,11 +315,12 @@ namespace Grpc.Net.Client.Internal
                             _retryCts.Token.ThrowIfCancellationRequested();
 
                             // Clean up the failed call.
-                            _call.Dispose();
+                            ActiveCall.Dispose();
 
                             // Start new call.
                             _attemptCount++;
-                            _call = CreateRetryCall(_call.ClientStreamWriter?.CompleteTcs.Task.IsCompletedSuccessfully ?? false);
+                            _bufferedMessagesIndex = 0;
+                            ActiveCall = CreateRetryCall(ActiveCall.ClientStreamWriter?.CompleteTcs.Task.IsCompletedSuccessfully ?? false);
 
                             // Signal any calls to public APIs (e.g. ResponseAsync, MoveNext, WriteAsync)
                             // that have thrown and are caught in catch blocks and are waiting for the call to retry.
@@ -412,9 +355,9 @@ namespace Grpc.Net.Client.Internal
         private int? GetRetryPushback()
         {
             // https://github.com/grpc/proposal/blob/master/A6-client-retries.md#pushback
-            if (_call.HttpResponse != null)
+            if (ActiveCall.HttpResponse != null)
             {
-                if (_call.HttpResponse.Headers.TryGetValues(GrpcProtocolConstants.RetryPushbackHeader, out var values))
+                if (ActiveCall.HttpResponse.Headers.TryGetValues(GrpcProtocolConstants.RetryPushbackHeader, out var values))
                 {
                     var headerValue = values.Single();
                     Log.RetryPushbackReceived(_logger, headerValue);
@@ -432,7 +375,7 @@ namespace Grpc.Net.Client.Internal
         {
             while (true)
             {
-                GrpcCall<TRequest, TResponse> call = _call;
+                GrpcCall<TRequest, TResponse> call = ActiveCall;
                 try
                 {
                     var headers = await call.GetResponseHeadersAsync().ConfigureAwait(false);
@@ -463,12 +406,12 @@ namespace Grpc.Net.Client.Internal
 
         public Status GetStatus()
         {
-            return _call.GetStatus();
+            return ActiveCall.GetStatus();
         }
 
         public Metadata GetTrailers()
         {
-            return _call.GetTrailers();
+            return ActiveCall.GetTrailers();
         }
 
         public void Dispose()
@@ -476,87 +419,32 @@ namespace Grpc.Net.Client.Internal
             lock (_lock)
             {
                 _retryCts.Cancel();
-                _call.Dispose();
+                ActiveCall.Dispose();
             }
         }
 
         public void StartUnary(TRequest request)
         {
-            _call.StartUnary(request);
+            ActiveCall.StartUnaryCore(new PushUnaryContent<TRequest, TResponse>(stream => WriteNewMessage(ActiveCall, stream, ActiveCall.Options, request)));
             _ = StartRetry();
         }
 
         public void StartClientStreaming()
         {
-            _call.StartClientStreaming();
+            ActiveCall.StartClientStreaming();
             _ = StartRetry();
         }
 
         public void StartServerStreaming(TRequest request)
         {
-            _call.StartServerStreaming(request);
+            ActiveCall.StartServerStreamingCore(new PushUnaryContent<TRequest, TResponse>(stream => WriteNewMessage(ActiveCall, stream, ActiveCall.Options, request)));
             _ = StartRetry();
         }
 
         public void StartDuplexStreaming()
         {
-            _call.StartDuplexStreaming();
+            ActiveCall.StartDuplexStreaming();
             _ = StartRetry();
-        }
-
-        private class RetryCaptureStream : Stream
-        {
-            private readonly Stream _inner;
-            private readonly List<ReadOnlyMemory<byte>> _writtenMessages;
-
-            public RetryCaptureStream(Stream inner, List<ReadOnlyMemory<byte>> writtenMessages)
-            {
-                _inner = inner;
-                _writtenMessages = writtenMessages;
-            }
-
-            public override bool CanRead => _inner.CanRead;
-            public override bool CanSeek => _inner.CanSeek;
-            public override bool CanWrite => _inner.CanWrite;
-            public override long Length => _inner.Length;
-            public override long Position
-            {
-                get => _inner.Position;
-                set => _inner.Position = value;
-            }
-
-            public override void Flush() => _inner.Flush();
-            public override int Read(byte[] buffer, int offset, int count) => _inner.Read(buffer, offset, count);
-            public override long Seek(long offset, SeekOrigin origin) => _inner.Seek(offset, origin);
-            public override void SetLength(long value) => _inner.SetLength(value);
-            public override void Write(byte[] buffer, int offset, int count) => _inner.Write(buffer, offset, count);
-
-            public override Task FlushAsync(CancellationToken cancellationToken) => _inner.FlushAsync(cancellationToken);
-            public override Task CopyToAsync(Stream destination, int bufferSize, CancellationToken cancellationToken) => _inner.CopyToAsync(destination, bufferSize, cancellationToken);
-            public override void Write(ReadOnlySpan<byte> buffer) => throw new NotSupportedException();
-            public override Task WriteAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
-            {
-                _writtenMessages.Add(buffer);
-                return _inner.WriteAsync(buffer, offset, count, cancellationToken);
-            }
-            public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
-            {
-                _writtenMessages.Add(buffer);
-                return _inner.WriteAsync(buffer, cancellationToken);
-            }
-            protected override void Dispose(bool disposing)
-            {
-                base.Dispose(disposing);
-                if (disposing)
-                {
-                    _inner.Dispose();
-                }
-            }
-            public override async ValueTask DisposeAsync()
-            {
-                await base.DisposeAsync().ConfigureAwait(false);
-                await _inner.DisposeAsync().ConfigureAwait(false);
-            }
         }
     }
 }

@@ -17,7 +17,6 @@
 #endregion
 
 using System;
-using System.Collections.Generic;
 using System.IO;
 using System.Net;
 using System.Net.Http;
@@ -30,8 +29,7 @@ namespace Grpc.Net.Client.Internal
         where TResponse : class
     {
         private readonly HttpContentClientStreamWriter<TRequest, TResponse> _streamWriter;
-        private readonly List<ReadOnlyMemory<byte>>? _data;
-        private readonly bool _completed;
+        private readonly Func<Stream, ValueTask>? _startCallback;
 
         public PushStreamContent(HttpContentClientStreamWriter<TRequest, TResponse> streamWriter)
         {
@@ -41,11 +39,9 @@ namespace Grpc.Net.Client.Internal
 
         public PushStreamContent(
             HttpContentClientStreamWriter<TRequest, TResponse> streamWriter,
-            List<ReadOnlyMemory<byte>> data,
-            bool completed) : this(streamWriter)
+            Func<Stream, ValueTask>? startCallback) : this(streamWriter)
         {
-            _data = data;
-            _completed = completed;
+            _startCallback = startCallback;
         }
 
         protected override async Task SerializeToStreamAsync(Stream stream, TransportContext? context)
@@ -54,22 +50,9 @@ namespace Grpc.Net.Client.Internal
             // https://github.com/dotnet/corefx/issues/39586#issuecomment-516210081
             await stream.FlushAsync().ConfigureAwait(false);
 
-            if (_data != null)
+            if (_startCallback != null)
             {
-                foreach (var item in _data)
-                {
-                    await _streamWriter.WriteAsyncCore(item, stream).ConfigureAwait(false);
-                }
-
-                if (_completed)
-                {
-                    await _streamWriter.CompleteAsync().ConfigureAwait(false);
-                }
-            }
-
-            if (_streamWriter.Call.StreamWrapper != null)
-            {
-                stream = _streamWriter.Call.StreamWrapper(stream);
+                await _startCallback(stream).ConfigureAwait(false);
             }
 
             // Pass request stream to writer

@@ -28,7 +28,7 @@ namespace Server
 {
     public class RetrierService : Retrier.RetrierBase
     {
-        private const double DeliveryChance = 0.5;
+        private const double DeliveryChance = 0.8;
 
         private readonly Random _random = new Random();
         private readonly ILogger<RetrierService> _logger;

@@ -158,8 +158,8 @@ namespace Grpc.Net.Client.Tests
                 {
                     MethodConfigs =
                     {
-                        new MethodConfig { Names = { Name.AllServices } },
-                        new MethodConfig { Names = { Name.AllServices } }
+                        new MethodConfig { Names = { Name.All } },
+                        new MethodConfig { Names = { Name.All } }
                     }
                 }
             }));
