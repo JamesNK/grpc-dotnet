@@ -32,22 +32,6 @@ using Microsoft.Extensions.Logging;
 
 namespace Grpc.Net.Client.Internal
 {
-    internal interface IGrpcCall<TRequest, TResponse> : IDisposable
-    {
-        Task<TResponse> GetResponseAsync();
-        Task<Metadata> GetResponseHeadersAsync();
-        Status GetStatus();
-        Metadata GetTrailers();
-
-        IClientStreamWriter<TRequest>? ClientStreamWriter { get; }
-        IAsyncStreamReader<TResponse>? ClientStreamReader { get; }
-
-        void StartUnary(TRequest request);
-        void StartClientStreaming();
-        void StartServerStreaming(TRequest request);
-        void StartDuplexStreaming();
-    }
-
     internal sealed partial class GrpcCall<TRequest, TResponse> : GrpcCall, IGrpcCall<TRequest, TResponse>
         where TRequest : class
         where TResponse : class

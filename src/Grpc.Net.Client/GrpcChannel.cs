@@ -57,7 +57,6 @@ namespace Grpc.Net.Client
         internal string MessageAcceptEncoding { get; }
         internal bool Disposed { get; private set; }
         internal ServiceConfig? ServiceConfig { get; }
-        
 
         // Options that are set in unit tests
         internal ISystemClock Clock = SystemClock.Instance;
@@ -338,47 +337,6 @@ namespace Grpc.Net.Client
             Disposed = true;
         }
 
-        private class DefaultChannelCredentialsConfigurator : ChannelCredentialsConfiguratorBase
-        {
-            public bool? IsSecure { get; private set; }
-            public List<CallCredentials>? CallCredentials { get; private set; }
-
-            public override void SetCompositeCredentials(object state, ChannelCredentials channelCredentials, CallCredentials callCredentials)
-            {
-                channelCredentials.InternalPopulateConfiguration(this, null);
-
-                if (callCredentials != null)
-                {
-                    if (CallCredentials == null)
-                    {
-                        CallCredentials = new List<CallCredentials>();
-                    }
-
-                    CallCredentials.Add(callCredentials);
-                }
-            }
-
-            public override void SetInsecureCredentials(object state)
-            {
-                IsSecure = false;
-            }
-
-            public override void SetSslCredentials(object state, string rootCertificates, KeyCertificatePair keyCertificatePair, VerifyPeerCallback verifyPeerCallback)
-            {
-                if (!string.IsNullOrEmpty(rootCertificates) ||
-                    keyCertificatePair != null ||
-                    verifyPeerCallback != null)
-                {
-                    throw new InvalidOperationException(
-                        $"{nameof(SslCredentials)} with non-null arguments is not supported by {nameof(GrpcChannel)}. " +
-                        $"{nameof(GrpcChannel)} uses HttpClient to make gRPC calls and HttpClient automatically loads root certificates from the operating system certificate store. " +
-                        $"Client certificates should be configured on HttpClient. See https://aka.ms/AA6we64 for details.");
-                }
-
-                IsSecure = true;
-            }
-        }
-
         private struct MethodKey : IEquatable<MethodKey>
         {
             public MethodKey(string? service, string? method)
@@ -390,26 +348,13 @@ namespace Grpc.Net.Client
             public string? Service { get; }
             public string? Method { get; }
 
-            public override bool Equals(object? obj)
-            {
-                if (obj is MethodKey n)
-                {
-                    return Equals(n);
-                }
-                return false;
-            }
+            public override bool Equals(object? obj) => obj is MethodKey n ? Equals(n) : false;
 
-            public bool Equals(MethodKey other)
-            {
-                return other.Service == Service && other.Method == Method;
-            }
+            public bool Equals(MethodKey other) => other.Service == Service && other.Method == Method;
 
-            public override int GetHashCode()
-            {
-#pragma warning disable CA1307 // Specify StringComparison
-                return Service?.GetHashCode() ?? 0 ^ Method?.GetHashCode() ?? 0;
-#pragma warning restore CA1307 // Specify StringComparison
-            }
+            public override int GetHashCode() =>
+                Service?.GetHashCode(StringComparison.Ordinal) ?? 0 ^
+                Method?.GetHashCode(StringComparison.Ordinal) ?? 0;
         }
     }
 }
