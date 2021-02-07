@@ -42,21 +42,8 @@ namespace Grpc.Net.Client.Internal.Retry
 
         public async Task<bool> MoveNext(CancellationToken cancellationToken)
         {
-            while (true)
-            {
-                GrpcCall<TRequest, TResponse> call = _retryCall.ActiveCall;
-                try
-                {
-                    return await call.ClientStreamReader!.MoveNext(cancellationToken).ConfigureAwait(false);
-                }
-                catch
-                {
-                    if (!await _retryCall.ResolveRetryTask(call).ConfigureAwait(false))
-                    {
-                        throw;
-                    }
-                }
-            }
+            var call = await _retryCall.FinalizedCallTask.ConfigureAwait(false);
+            return await call.ClientStreamReader!.MoveNext(cancellationToken).ConfigureAwait(false);
         }
     }
 }

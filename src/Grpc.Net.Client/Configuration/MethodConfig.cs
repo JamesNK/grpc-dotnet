@@ -27,12 +27,16 @@ namespace Grpc.Net.Client.Configuration
     {
         private const string NamePropertyName = "name";
         private const string RetryPolicyPropertyName = "retryPolicy";
+        private const string HedgingPolicyPropertyName = "hedgingPolicy";
 
         private ConfigProperty<Values<Name, object>, IList<object>> _names =
             new(i => new Values<Name, object>(i ?? new List<object>(), new List<Name>(), s => s.Inner, s => new Name((IDictionary<string, object>)s)), NamePropertyName);
 
         private ConfigProperty<RetryPolicy, IDictionary<string, object>> _retryPolicy =
             new(i => i != null ? new RetryPolicy(i) : null, RetryPolicyPropertyName);
+
+        private ConfigProperty<HedgingPolicy, IDictionary<string, object>> _hedgingPolicy =
+            new(i => i != null ? new HedgingPolicy(i) : null, HedgingPolicyPropertyName);
 
         public MethodConfig()
         {
@@ -46,6 +50,12 @@ namespace Grpc.Net.Client.Configuration
         {
             get => _retryPolicy.GetValue(this);
             set => _retryPolicy.SetValue(this, value);
+        }
+
+        public HedgingPolicy? HedgingPolicy
+        {
+            get => _hedgingPolicy.GetValue(this);
+            set => _hedgingPolicy.SetValue(this, value);
         }
 
         public IList<Name> Names

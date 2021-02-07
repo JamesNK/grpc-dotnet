@@ -12,6 +12,7 @@
     <Compile Include="..\Shared\CallbackInterceptor.cs" Link="Infrastructure\CallbackInterceptor.cs" />
     <Compile Include="..\Shared\ClientBaseTests.cs" Link="ClientBaseTests.cs" />
     <Compile Include="..\Shared\ClientTestHelpers.cs" Link="Infrastructure\ClientTestHelpers.cs" />
+    <Compile Include="..\Shared\ServiceConfigHelpers.cs" Link="Infrastructure\ServiceConfigHelpers.cs" />
     <Compile Include="..\Shared\ExceptionAssert.cs" Link="Infrastructure\ExceptionAssert.cs" />
     <Compile Include="..\Shared\TaskExtensions.cs" Link="Infrastructure\TaskExtensions.cs" />
     <Compile Include="..\Shared\ResponseUtils.cs" Link="Infrastructure\ResponseUtils.cs" />

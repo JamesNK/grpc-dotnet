@@ -38,7 +38,7 @@ namespace Grpc.Net.Client.Internal
         where TRequest : class
         where TResponse : class
     {
-        private const string ErrorStartingCallMessage = "Error starting gRPC call.";
+        internal const string ErrorStartingCallMessage = "Error starting gRPC call.";
 
         private readonly CancellationTokenSource _callCts;
         private readonly TaskCompletionSource<Status> _callTcs;
@@ -46,7 +46,7 @@ namespace Grpc.Net.Client.Internal
         private readonly GrpcMethodInfo _grpcMethodInfo;
         private readonly int _previousAttempts;
 
-        private Task<HttpResponseMessage>? _httpResponseTask;
+        internal Task<HttpResponseMessage>? _httpResponseTask;
         private Task<Metadata>? _responseHeadersTask;
         private Timer? _deadlineTimer;
         private CancellationTokenRegistration? _ctsRegistration;
@@ -211,7 +211,7 @@ namespace Grpc.Net.Client.Internal
         /// <summary>
         /// Clean up can be called by:
         /// 1. The user. AsyncUnaryCall.Dispose et al will call this on Dispose
-        /// 2. <see cref="ValidateHeaders"/> will call dispose if errors fail validation
+        /// 2. <see cref="GrpcCall.ValidateHeaders"/> will call dispose if errors fail validation
         /// 3. <see cref="FinishResponseAndCleanUp"/> will call dispose
         /// </summary>
         private void Cleanup(Status status)
@@ -355,77 +355,6 @@ namespace Grpc.Net.Client.Internal
             return _responseTcs.Task;
         }
 
-        private Status? ValidateHeaders(HttpResponseMessage httpResponse)
-        {
-            GrpcCallLog.ResponseHeadersReceived(Logger);
-
-            // gRPC status can be returned in the header when there is no message (e.g. unimplemented status)
-            // An explicitly specified status header has priority over other failing statuses
-            if (GrpcProtocolHelpers.TryGetStatusCore(httpResponse.Headers, out var status))
-            {
-                // Trailers are in the header because there is no message.
-                // Note that some default headers will end up in the trailers (e.g. Date, Server).
-                Trailers = GrpcProtocolHelpers.BuildMetadata(httpResponse.Headers);
-                return status;
-            }
-
-            // ALPN negotiation is sending HTTP/1.1 and HTTP/2.
-            // Check that the response wasn't downgraded to HTTP/1.1.
-            if (httpResponse.Version < HttpVersion.Version20)
-            {
-                return new Status(StatusCode.Internal, $"Bad gRPC response. Response protocol downgraded to HTTP/{httpResponse.Version.ToString(2)}.");
-            }
-
-            if (httpResponse.StatusCode != HttpStatusCode.OK)
-            {
-                var statusCode = MapHttpStatusToGrpcCode(httpResponse.StatusCode);
-                return new Status(statusCode, "Bad gRPC response. HTTP status code: " + (int)httpResponse.StatusCode);
-            }
-            
-            if (httpResponse.Content?.Headers.ContentType == null)
-            {
-                return new Status(StatusCode.Cancelled, "Bad gRPC response. Response did not have a content-type header.");
-            }
-
-            var grpcEncoding = httpResponse.Content.Headers.ContentType;
-            if (!CommonGrpcProtocolHelpers.IsContentType(GrpcProtocolConstants.GrpcContentType, grpcEncoding?.MediaType))
-            {
-                return new Status(StatusCode.Cancelled, "Bad gRPC response. Invalid content-type value: " + grpcEncoding);
-            }
-
-            // Call is still in progress
-            return null;
-        }
-
-        private static StatusCode MapHttpStatusToGrpcCode(HttpStatusCode httpStatusCode)
-        {
-            switch (httpStatusCode)
-            {
-                case HttpStatusCode.BadRequest:  // 400
-                case HttpStatusCode.RequestHeaderFieldsTooLarge: // 431
-                    return StatusCode.Internal;
-                case HttpStatusCode.Unauthorized:  // 401
-                    return StatusCode.Unauthenticated;
-                case HttpStatusCode.Forbidden:  // 403
-                    return StatusCode.PermissionDenied;
-                case HttpStatusCode.NotFound:  // 404
-                    return StatusCode.Unimplemented;
-                case HttpStatusCode.TooManyRequests:  // 429
-                case HttpStatusCode.BadGateway:  // 502
-                case HttpStatusCode.ServiceUnavailable:  // 503
-                case HttpStatusCode.GatewayTimeout:  // 504
-                    return StatusCode.Unavailable;
-                default:
-                    if ((int)httpStatusCode >= 100 && (int)httpStatusCode < 200)
-                    {
-                        // 1xx. These headers should have been ignored.
-                        return StatusCode.Internal;
-                    }
-
-                    return StatusCode.Unknown;
-            }
-        }
-
         public Metadata GetTrailers()
         {
             using (StartScope())
@@ -529,11 +458,26 @@ namespace Grpc.Net.Client.Internal
                     }
                     catch (Exception ex)
                     {
-                        GrpcCallLog.ErrorStartingCall(Logger, ex);
-                        throw;
+                        // Don't log OperationCanceledException if deadline has exceeded.
+                        if (ex is OperationCanceledException &&
+                            _callTcs.Task.IsCompletedSuccessfully &&
+                            _callTcs.Task.Result.StatusCode == StatusCode.DeadlineExceeded)
+                        {
+                            throw;
+                        }
+                        else
+                        {
+                            GrpcCallLog.ErrorStartingCall(Logger, ex);
+                            throw;
+                        }
                     }
 
-                    status = ValidateHeaders(HttpResponse);
+                    GrpcCallLog.ResponseHeadersReceived(Logger);
+                    status = ValidateHeaders(HttpResponse, out var trailers);
+                    if (trailers != null)
+                    {
+                        Trailers = trailers;
+                    }
 
                     // A status means either the call has failed or grpc-status was returned in the response header
                     if (status != null)

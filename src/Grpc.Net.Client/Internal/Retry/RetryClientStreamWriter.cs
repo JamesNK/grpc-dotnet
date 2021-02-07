@@ -35,6 +35,13 @@ namespace Grpc.Net.Client.Internal.Retry
 
         public WriteOptions WriteOptions { get; set; }
 
+        //public Task CompleteAsync()
+        //{
+        //    return _retryCall.ClientStreamCompleteAsync();
+        //    var call = await _retryCall.FinalizedCallTask.ConfigureAwait(false);
+        //    await call.ClientStreamWriter!.CompleteAsync().ConfigureAwait(false);
+        //}
+
         public async Task CompleteAsync()
         {
             while (true)
@@ -57,6 +64,8 @@ namespace Grpc.Net.Client.Internal.Retry
 
         public async Task WriteAsync(TRequest message)
         {
+            //return _retryCall.ClientStreamWriteAsync(message);
+
             while (true)
             {
                 GrpcCall<TRequest, TResponse> call = _retryCall.ActiveCall;

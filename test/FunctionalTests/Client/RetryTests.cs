@@ -66,7 +66,7 @@ namespace Grpc.AspNetCore.FunctionalTests.Client
             // Arrange
             var method = Fixture.DynamicGrpc.AddClientStreamingMethod<DataMessage, DataMessage>(UnaryDeadlineExceeded);
 
-            var channel = CreateChannel(serviceConfig: CreateServiceConfig(maxAttempts: 10));
+            var channel = CreateChannel(serviceConfig: ServiceConfigHelpers.CreateServiceConfig(maxAttempts: 10));
 
             var client = TestClientFactory.Create(channel, method);
 
@@ -106,7 +106,7 @@ namespace Grpc.AspNetCore.FunctionalTests.Client
             // Arrange
             var method = Fixture.DynamicGrpc.AddUnaryMethod<DataMessage, DataMessage>(UnaryFailure);
 
-            var channel = CreateChannel(serviceConfig: CreateServiceConfig());
+            var channel = CreateChannel(serviceConfig: ServiceConfigHelpers.CreateServiceConfig());
 
             var client = TestClientFactory.Create(channel, method);
 
@@ -137,7 +137,7 @@ namespace Grpc.AspNetCore.FunctionalTests.Client
             // Arrange
             var method = Fixture.DynamicGrpc.AddUnaryMethod<DataMessage, DataMessage>(UnaryFailure);
 
-            var channel = CreateChannel(serviceConfig: CreateServiceConfig(retryThrottling: new RetryThrottlingPolicy
+            var channel = CreateChannel(serviceConfig: ServiceConfigHelpers.CreateServiceConfig(retryThrottling: new RetryThrottlingPolicy
             {
                 MaxTokens = 5,
                 TokenRatio = 0.1
@@ -156,27 +156,104 @@ namespace Grpc.AspNetCore.FunctionalTests.Client
             AssertHasLog(LogLevel.Debug, "RetryEvaluated", "Evaluated retry decision for failed gRPC call. Status code: 'Unavailable', Attempt: 3, Decision: Throttled");
         }
 
-        private static ServiceConfig CreateServiceConfig(int? maxAttempts = null, double? backoffMultiplier = null, RetryThrottlingPolicy? retryThrottling = null)
+        [TestCase(1)]
+        [TestCase(2)]
+        public async Task Unary_DeadlineExceedAfterServerCall_Failure(int exceptedServerCallCount)
         {
-            return new ServiceConfig
+            var callCount = 0;
+            var tcs = new TaskCompletionSource<DataMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
+            Task<DataMessage> UnaryFailure(DataMessage request, ServerCallContext context)
             {
-                MethodConfigs =
+                callCount++;
+
+                if (callCount < exceptedServerCallCount)
                 {
-                    new MethodConfig
-                    {
-                        Names = { Name.All },
-                        RetryPolicy = new RetryPolicy
-                        {
-                            MaxAttempts = maxAttempts ?? 5,
-                            InitialBackoff = TimeSpan.Zero,
-                            MaxBackoff = TimeSpan.Zero,
-                            BackoffMultiplier = backoffMultiplier ?? 1.1,
-                            RetryableStatusCodes = { StatusCode.Unavailable }
-                        }
-                    }
-                },
-                RetryThrottling = retryThrottling
-            };
+                    return Task.FromException<DataMessage>(new RpcException(new Status(StatusCode.DeadlineExceeded, "")));
+                }
+
+                return tcs.Task;
+            }
+
+            // Arrange
+            var method = Fixture.DynamicGrpc.AddUnaryMethod<DataMessage, DataMessage>(UnaryFailure);
+
+            var serviceConfig = ServiceConfigHelpers.CreateServiceConfig(retryableStatusCodes: new List<StatusCode> { StatusCode.DeadlineExceeded });
+            var channel = CreateChannel(serviceConfig: serviceConfig);
+
+            var client = TestClientFactory.Create(channel, method);
+
+            // Act
+            var call = client.UnaryCall(new DataMessage(), new CallOptions(deadline: DateTime.UtcNow.AddMilliseconds(200)));
+
+            // Assert
+            var ex = await ExceptionAssert.ThrowsAsync<RpcException>(() => call.ResponseAsync).DefaultTimeout();
+            Assert.AreEqual(StatusCode.DeadlineExceeded, ex.StatusCode);
+            Assert.AreEqual(StatusCode.DeadlineExceeded, call.GetStatus().StatusCode);
+            Assert.AreEqual(exceptedServerCallCount, callCount);
+
+            AssertHasLog(LogLevel.Debug, "RetryEvaluated", $"Evaluated retry decision for failed gRPC call. Status code: 'DeadlineExceeded', Attempt: {exceptedServerCallCount}, Decision: DeadlineExceeded");
+
+            tcs.SetResult(new DataMessage());
         }
+
+        [Test]
+        public async Task Unary_DeadlineExceedBeforeServerCall_Failure()
+        {
+            var callCount = 0;
+            var tcs = new TaskCompletionSource<DataMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
+            Task<DataMessage> UnaryFailure(DataMessage request, ServerCallContext context)
+            {
+                callCount++;
+                return tcs.Task;
+            }
+
+            // Arrange
+            var method = Fixture.DynamicGrpc.AddUnaryMethod<DataMessage, DataMessage>(UnaryFailure);
+
+            var serviceConfig = ServiceConfigHelpers.CreateServiceConfig(retryableStatusCodes: new List<StatusCode> { StatusCode.DeadlineExceeded });
+            var channel = CreateChannel(serviceConfig: serviceConfig);
+
+            var client = TestClientFactory.Create(channel, method);
+
+            // Act
+            var call = client.UnaryCall(new DataMessage(), new CallOptions(deadline: DateTime.UtcNow));
+
+            // Assert
+            var ex = await ExceptionAssert.ThrowsAsync<RpcException>(() => call.ResponseAsync).DefaultTimeout();
+            Assert.AreEqual(StatusCode.DeadlineExceeded, ex.StatusCode);
+            Assert.AreEqual(StatusCode.DeadlineExceeded, call.GetStatus().StatusCode);
+            Assert.AreEqual(0, callCount);
+
+            AssertHasLog(LogLevel.Debug, "RetryEvaluated", "Evaluated retry decision for failed gRPC call. Status code: 'DeadlineExceeded', Attempt: 1, Decision: DeadlineExceeded");
+
+            tcs.SetResult(new DataMessage());
+        }
+
+        //[Test]
+        //public async Task Unary_DeadlineExceed_Failure()
+        //{
+        //    // Arrange
+
+        //    var callCount = 0;
+        //    var httpClient = ClientTestHelpers.CreateTestClient(async request =>
+        //    {
+        //        callCount++;
+        //        await request.Content!.CopyToAsync(new MemoryStream());
+        //        return await tcs.Task;
+        //    });
+        //    var serviceConfig = CreateServiceConfig(retryableStatusCodes: new List<StatusCode> { StatusCode.DeadlineExceeded });
+        //    var invoker = HttpClientCallInvokerFactory.Create(httpClient, serviceConfig: serviceConfig);
+
+        //    // Act
+        //    var call = invoker.AsyncUnaryCall<HelloRequest, HelloReply>(ClientTestHelpers.ServiceMethod, string.Empty, new CallOptions(deadline: DateTime.UtcNow.AddMilliseconds(50)), new HelloRequest { Name = "World" });
+
+        //    // Assert
+        //    Assert.GreaterOrEqual(1, callCount);
+        //    var ex = await ExceptionAssert.ThrowsAsync<RpcException>(() => call.ResponseAsync).DefaultTimeout();
+        //    Assert.AreEqual(StatusCode.DeadlineExceeded, ex.StatusCode);
+        //    Assert.AreEqual(StatusCode.DeadlineExceeded, call.GetStatus().StatusCode);
+
+        //    tcs.SetException(new OperationCanceledException());
+        //}
     }
 }
