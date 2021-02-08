@@ -68,9 +68,12 @@ namespace Grpc.Net.Client.Tests.Retry
                 var reply = new HelloReply { Message = "Hello world" };
                 var streamContent = await ClientTestHelpers.CreateResponseContent(reply).DefaultTimeout();
 
-                return ResponseUtils.CreateResponse(HttpStatusCode.OK, streamContent);
+                return ResponseUtils.CreateResponse(HttpStatusCode.OK, streamContent, customTrailers: new Dictionary<string, string>
+                {
+                    ["custom-trailer"] = "Value!"
+                });
             });
-            var serviceConfig = ServiceConfigHelpers.CreateServiceConfig();
+            var serviceConfig = ServiceConfigHelpers.CreateRetryServiceConfig();
             var invoker = HttpClientCallInvokerFactory.Create(httpClient, serviceConfig: serviceConfig);
 
             // Act
@@ -90,6 +93,9 @@ namespace Grpc.Net.Client.Tests.Retry
 
             Assert.IsFalse(firstRequestPreviousAttemptsHeader);
             Assert.AreEqual("1", secondRequestPreviousAttemptsHeaderValue);
+
+            var trailers = call.GetTrailers();
+            Assert.AreEqual("Value!", trailers.GetValue("custom-trailer"));
         }
 
         [Test]
@@ -127,7 +133,7 @@ namespace Grpc.Net.Client.Tests.Retry
                     streamContent,
                     customHeaders: new Dictionary<string, string> { ["call-count"] = callCount.ToString() });
             });
-            var serviceConfig = ServiceConfigHelpers.CreateServiceConfig();
+            var serviceConfig = ServiceConfigHelpers.CreateRetryServiceConfig();
             var invoker = HttpClientCallInvokerFactory.Create(httpClient, serviceConfig: serviceConfig);
 
             // Act
@@ -156,7 +162,7 @@ namespace Grpc.Net.Client.Tests.Retry
                 await request.Content!.CopyToAsync(new MemoryStream());
                 return ResponseUtils.CreateHeadersOnlyResponse(HttpStatusCode.OK, StatusCode.Unavailable);
             });
-            var serviceConfig = ServiceConfigHelpers.CreateServiceConfig(maxAttempts: 3);
+            var serviceConfig = ServiceConfigHelpers.CreateRetryServiceConfig(maxAttempts: 3);
             var invoker = HttpClientCallInvokerFactory.Create(httpClient, serviceConfig: serviceConfig);
 
             // Act
@@ -181,7 +187,7 @@ namespace Grpc.Net.Client.Tests.Retry
                 return ResponseUtils.CreateHeadersOnlyResponse(HttpStatusCode.OK, StatusCode.Unavailable);
             });
             // Very long delay
-            var serviceConfig = ServiceConfigHelpers.CreateServiceConfig(initialBackoff: TimeSpan.FromSeconds(30), maxBackoff: TimeSpan.FromSeconds(30));
+            var serviceConfig = ServiceConfigHelpers.CreateRetryServiceConfig(initialBackoff: TimeSpan.FromSeconds(30), maxBackoff: TimeSpan.FromSeconds(30));
             var invoker = HttpClientCallInvokerFactory.Create(httpClient, serviceConfig: serviceConfig);
 
             // Act
@@ -209,7 +215,7 @@ namespace Grpc.Net.Client.Tests.Retry
                 await request.Content!.CopyToAsync(new MemoryStream());
                 return ResponseUtils.CreateResponse(HttpStatusCode.OK, new StringContent(""), StatusCode.Unavailable, retryPushbackHeader: header);
             });
-            var serviceConfig = ServiceConfigHelpers.CreateServiceConfig();
+            var serviceConfig = ServiceConfigHelpers.CreateRetryServiceConfig();
             var invoker = HttpClientCallInvokerFactory.Create(httpClient, serviceConfig: serviceConfig);
 
             // Act
@@ -240,7 +246,7 @@ namespace Grpc.Net.Client.Tests.Retry
                 var streamContent = await ClientTestHelpers.CreateResponseContent(reply).DefaultTimeout();
                 return ResponseUtils.CreateResponse(HttpStatusCode.OK, streamContent);
             });
-            var serviceConfig = ServiceConfigHelpers.CreateServiceConfig(backoffMultiplier: 1);
+            var serviceConfig = ServiceConfigHelpers.CreateRetryServiceConfig(backoffMultiplier: 1);
             var invoker = HttpClientCallInvokerFactory.Create(httpClient, serviceConfig: serviceConfig);
 
             // Act
@@ -266,7 +272,7 @@ namespace Grpc.Net.Client.Tests.Retry
                 await request.Content!.CopyToAsync(new MemoryStream());
                 return ResponseUtils.CreateHeadersOnlyResponse(HttpStatusCode.OK, StatusCode.Unavailable, retryPushbackHeader: "0");
             });
-            var serviceConfig = ServiceConfigHelpers.CreateServiceConfig(maxAttempts: 5);
+            var serviceConfig = ServiceConfigHelpers.CreateRetryServiceConfig(maxAttempts: 5);
             var invoker = HttpClientCallInvokerFactory.Create(httpClient, serviceConfig: serviceConfig);
 
             // Act
@@ -289,7 +295,7 @@ namespace Grpc.Net.Client.Tests.Retry
                 await request.Content!.CopyToAsync(new MemoryStream());
                 return ResponseUtils.CreateResponse(HttpStatusCode.OK, new StringContent(""), StatusCode.InvalidArgument);
             });
-            var serviceConfig = ServiceConfigHelpers.CreateServiceConfig();
+            var serviceConfig = ServiceConfigHelpers.CreateRetryServiceConfig();
             var invoker = HttpClientCallInvokerFactory.Create(httpClient, serviceConfig: serviceConfig);
 
             // Act
@@ -319,7 +325,7 @@ namespace Grpc.Net.Client.Tests.Retry
 
                 return ResponseUtils.CreateResponse(HttpStatusCode.OK, streamContent);
             });
-            var serviceConfig = ServiceConfigHelpers.CreateServiceConfig();
+            var serviceConfig = ServiceConfigHelpers.CreateRetryServiceConfig();
             var invoker = HttpClientCallInvokerFactory.Create(httpClient, serviceConfig: serviceConfig);
 
             // Act
@@ -353,7 +359,7 @@ namespace Grpc.Net.Client.Tests.Retry
 
                 return ResponseUtils.CreateResponse(HttpStatusCode.OK, streamContent);
             });
-            var serviceConfig = ServiceConfigHelpers.CreateServiceConfig();
+            var serviceConfig = ServiceConfigHelpers.CreateRetryServiceConfig();
             var invoker = HttpClientCallInvokerFactory.Create(httpClient, serviceConfig: serviceConfig);
 
             // Act
@@ -413,7 +419,7 @@ namespace Grpc.Net.Client.Tests.Retry
 
                 return ResponseUtils.CreateResponse(HttpStatusCode.OK, streamContent);
             });
-            var serviceConfig = ServiceConfigHelpers.CreateServiceConfig();
+            var serviceConfig = ServiceConfigHelpers.CreateRetryServiceConfig();
             var invoker = HttpClientCallInvokerFactory.Create(httpClient, serviceConfig: serviceConfig);
 
             // Act
@@ -452,7 +458,7 @@ namespace Grpc.Net.Client.Tests.Retry
         {
             // Arrange
             HttpContent? content = null;
-            SyncPoint syncPoint = new SyncPoint(runContinuationsAsynchronously: true);
+            var syncPoint = new SyncPoint(runContinuationsAsynchronously: true);
 
             var callCount = 0;
             var httpClient = ClientTestHelpers.CreateTestClient(async request =>
@@ -475,7 +481,7 @@ namespace Grpc.Net.Client.Tests.Retry
 
                 return ResponseUtils.CreateResponse(HttpStatusCode.OK, streamContent);
             });
-            var serviceConfig = ServiceConfigHelpers.CreateServiceConfig();
+            var serviceConfig = ServiceConfigHelpers.CreateRetryServiceConfig();
             var invoker = HttpClientCallInvokerFactory.Create(httpClient, serviceConfig: serviceConfig);
 
             // Act
@@ -509,7 +515,7 @@ namespace Grpc.Net.Client.Tests.Retry
                 callCount++;
                 return Task.FromResult(ResponseUtils.CreateResponse(HttpStatusCode.OK, new StreamContent(streamContent)));
             });
-            var serviceConfig = ServiceConfigHelpers.CreateServiceConfig();
+            var serviceConfig = ServiceConfigHelpers.CreateRetryServiceConfig();
             var invoker = HttpClientCallInvokerFactory.Create(httpClient, serviceConfig: serviceConfig);
 
             // Act
@@ -548,7 +554,7 @@ namespace Grpc.Net.Client.Tests.Retry
         {
             // Arrange
             PushStreamContent<HelloRequest, HelloReply>? content = null;
-            SyncPoint syncPoint = new SyncPoint(runContinuationsAsynchronously: true);
+            var syncPoint = new SyncPoint(runContinuationsAsynchronously: true);
 
             var callCount = 0;
             var httpClient = ClientTestHelpers.CreateTestClient(async request =>
@@ -574,7 +580,7 @@ namespace Grpc.Net.Client.Tests.Retry
 
                 return ResponseUtils.CreateResponse(HttpStatusCode.OK, streamContent);
             });
-            var serviceConfig = ServiceConfigHelpers.CreateServiceConfig();
+            var serviceConfig = ServiceConfigHelpers.CreateRetryServiceConfig();
             var invoker = HttpClientCallInvokerFactory.Create(httpClient, serviceConfig: serviceConfig);
 
             // Act

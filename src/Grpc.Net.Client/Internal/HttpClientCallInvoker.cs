@@ -127,14 +127,20 @@ namespace Grpc.Net.Client.Internal
         {
             var methodInfo = channel.GetCachedGrpcMethodInfo(method);
             var retryPolicy = methodInfo.MethodConfig?.RetryPolicy;
-            if (retryPolicy == null)
+            var hedgingPolicy = methodInfo.MethodConfig?.HedgingPolicy;
+
+            if (retryPolicy != null)
             {
-                // No retry/hedge policy configured. Fast path!
-                return CreateGrpcCall<TRequest, TResponse>(channel, method, options, previousAttempts: 0);
+                return new RetryCall<TRequest, TResponse>(retryPolicy, channel, method, options);
+            }
+            else if (hedgingPolicy != null)
+            {
+                return new HedgingCall<TRequest, TResponse>(hedgingPolicy, channel, method, options);
             }
             else
             {
-                return new RetryCall<TRequest, TResponse>(retryPolicy, channel, method, options);
+                // No retry/hedge policy configured. Fast path!
+                return CreateGrpcCall<TRequest, TResponse>(channel, method, options, previousAttempts: 0);
             }
         }
 

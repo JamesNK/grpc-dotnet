@@ -66,7 +66,7 @@ namespace Grpc.AspNetCore.FunctionalTests.Client
             // Arrange
             var method = Fixture.DynamicGrpc.AddClientStreamingMethod<DataMessage, DataMessage>(UnaryDeadlineExceeded);
 
-            var channel = CreateChannel(serviceConfig: ServiceConfigHelpers.CreateServiceConfig(maxAttempts: 10));
+            var channel = CreateChannel(serviceConfig: ServiceConfigHelpers.CreateRetryServiceConfig(maxAttempts: 10));
 
             var client = TestClientFactory.Create(channel, method);
 
@@ -106,7 +106,7 @@ namespace Grpc.AspNetCore.FunctionalTests.Client
             // Arrange
             var method = Fixture.DynamicGrpc.AddUnaryMethod<DataMessage, DataMessage>(UnaryFailure);
 
-            var channel = CreateChannel(serviceConfig: ServiceConfigHelpers.CreateServiceConfig());
+            var channel = CreateChannel(serviceConfig: ServiceConfigHelpers.CreateRetryServiceConfig());
 
             var client = TestClientFactory.Create(channel, method);
 
@@ -137,7 +137,7 @@ namespace Grpc.AspNetCore.FunctionalTests.Client
             // Arrange
             var method = Fixture.DynamicGrpc.AddUnaryMethod<DataMessage, DataMessage>(UnaryFailure);
 
-            var channel = CreateChannel(serviceConfig: ServiceConfigHelpers.CreateServiceConfig(retryThrottling: new RetryThrottlingPolicy
+            var channel = CreateChannel(serviceConfig: ServiceConfigHelpers.CreateRetryServiceConfig(retryThrottling: new RetryThrottlingPolicy
             {
                 MaxTokens = 5,
                 TokenRatio = 0.1
@@ -177,7 +177,7 @@ namespace Grpc.AspNetCore.FunctionalTests.Client
             // Arrange
             var method = Fixture.DynamicGrpc.AddUnaryMethod<DataMessage, DataMessage>(UnaryFailure);
 
-            var serviceConfig = ServiceConfigHelpers.CreateServiceConfig(retryableStatusCodes: new List<StatusCode> { StatusCode.DeadlineExceeded });
+            var serviceConfig = ServiceConfigHelpers.CreateRetryServiceConfig(retryableStatusCodes: new List<StatusCode> { StatusCode.DeadlineExceeded });
             var channel = CreateChannel(serviceConfig: serviceConfig);
 
             var client = TestClientFactory.Create(channel, method);
@@ -210,7 +210,7 @@ namespace Grpc.AspNetCore.FunctionalTests.Client
             // Arrange
             var method = Fixture.DynamicGrpc.AddUnaryMethod<DataMessage, DataMessage>(UnaryFailure);
 
-            var serviceConfig = ServiceConfigHelpers.CreateServiceConfig(retryableStatusCodes: new List<StatusCode> { StatusCode.DeadlineExceeded });
+            var serviceConfig = ServiceConfigHelpers.CreateRetryServiceConfig(retryableStatusCodes: new List<StatusCode> { StatusCode.DeadlineExceeded });
             var channel = CreateChannel(serviceConfig: serviceConfig);
 
             var client = TestClientFactory.Create(channel, method);

@@ -1,0 +1,318 @@
+﻿#region Copyright notice and license
+
+// Copyright 2019 The gRPC Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+#endregion
+
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.IO;
+using System.Linq;
+using System.Net;
+using System.Net.Http;
+using System.Threading;
+using System.Threading.Tasks;
+using Google.Protobuf;
+using Greet;
+using Grpc.Core;
+using Grpc.Net.Client.Configuration;
+using Grpc.Net.Client.Internal;
+using Grpc.Net.Client.Tests.Infrastructure;
+using Grpc.Tests.Shared;
+using NUnit.Framework;
+
+namespace Grpc.Net.Client.Tests.Retry
+{
+    [TestFixture]
+    public class HedgingTests
+    {
+        [Test]
+        public async Task AsyncUnaryCall_OneAttempt_Success()
+        {
+            // Arrange
+            var callCount = 0;
+            var httpClient = ClientTestHelpers.CreateTestClient(async request =>
+            {
+                Interlocked.Increment(ref callCount);
+                await request.Content!.CopyToAsync(new MemoryStream());
+
+                var reply = new HelloReply { Message = "Hello world" };
+                var streamContent = await ClientTestHelpers.CreateResponseContent(reply).DefaultTimeout();
+                return ResponseUtils.CreateResponse(HttpStatusCode.OK, streamContent);
+            });
+            var serviceConfig = ServiceConfigHelpers.CreateHedgingServiceConfig(maxAttempts: 1);
+            var invoker = HttpClientCallInvokerFactory.Create(httpClient, serviceConfig: serviceConfig);
+
+            // Act
+            var call = invoker.AsyncUnaryCall<HelloRequest, HelloReply>(ClientTestHelpers.ServiceMethod, string.Empty, new CallOptions(), new HelloRequest { Name = "World" });
+
+            // Assert
+            Assert.AreEqual(1, callCount);
+            var rs = await call.ResponseAsync.DefaultTimeout();
+            Assert.AreEqual("Hello world", rs.Message);
+            Assert.AreEqual(StatusCode.OK, call.GetStatus().StatusCode);
+        }
+
+        [Test]
+        public async Task AsyncUnaryCall_ExceedAttempts_Failure()
+        {
+            // Arrange
+            var tcs = new TaskCompletionSource<object?>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var requestMessages = new List<HelloRequest>();
+
+            var callCount = 0;
+            var httpClient = ClientTestHelpers.CreateTestClient(async request =>
+            {
+                // All calls are in-progress at once.
+                Interlocked.Increment(ref callCount);
+                if (callCount == 5)
+                {
+                    tcs.TrySetResult(null);
+                }
+                await tcs.Task;
+
+                var requestContent = await request.Content!.ReadAsStreamAsync();
+                var requestMessage = await ReadRequestMessage(requestContent);
+                lock (requestMessages)
+                {
+                    requestMessages.Add(requestMessage!);
+                }
+
+                return ResponseUtils.CreateHeadersOnlyResponse(HttpStatusCode.OK, StatusCode.Unavailable);
+            });
+            var serviceConfig = ServiceConfigHelpers.CreateHedgingServiceConfig();
+            var invoker = HttpClientCallInvokerFactory.Create(httpClient, serviceConfig: serviceConfig);
+
+            // Act
+            var call = invoker.AsyncUnaryCall<HelloRequest, HelloReply>(ClientTestHelpers.ServiceMethod, string.Empty, new CallOptions(), new HelloRequest { Name = "World" });
+
+            // Assert
+            Assert.AreEqual(5, callCount);
+            var ex = await ExceptionAssert.ThrowsAsync<RpcException>(() => call.ResponseAsync).DefaultTimeout();
+            Assert.AreEqual(StatusCode.Unavailable, ex.StatusCode);
+            Assert.AreEqual(StatusCode.Unavailable, call.GetStatus().StatusCode);
+
+            Assert.AreEqual(5, requestMessages.Count);
+            foreach (var requestMessage in requestMessages)
+            {
+                Assert.AreEqual("World", requestMessage.Name);
+            }
+        }
+
+        [Test]
+        public async Task AsyncUnaryCall_ManyAttemptsNoDelay_MarshallerCalledOnce()
+        {
+            // Arrange
+            var callCount = 0;
+            var httpClient = ClientTestHelpers.CreateTestClient(async request =>
+            {
+                Interlocked.Increment(ref callCount);
+                await request.Content!.CopyToAsync(new MemoryStream());
+                return ResponseUtils.CreateHeadersOnlyResponse(HttpStatusCode.OK, StatusCode.Unavailable);
+            });
+            var serviceConfig = ServiceConfigHelpers.CreateHedgingServiceConfig();
+            var invoker = HttpClientCallInvokerFactory.Create(httpClient, serviceConfig: serviceConfig);
+
+            var marshallerCount = 0;
+            var requestMarshaller = Marshallers.Create<HelloRequest>(
+                r =>
+                {
+                    Interlocked.Increment(ref marshallerCount);
+                    return r.ToByteArray();
+                },
+                data => HelloRequest.Parser.ParseFrom(data));
+            var method = ClientTestHelpers.GetServiceMethod(requestMarshaller: requestMarshaller);
+
+            // Act
+            var call = invoker.AsyncUnaryCall<HelloRequest, HelloReply>(method, string.Empty, new CallOptions(), new HelloRequest { Name = "World" });
+
+            // Assert
+            var ex = await ExceptionAssert.ThrowsAsync<RpcException>(() => call.ResponseAsync).DefaultTimeout();
+            Assert.AreEqual(StatusCode.Unavailable, ex.StatusCode);
+            Assert.AreEqual(StatusCode.Unavailable, call.GetStatus().StatusCode);
+
+            Assert.AreEqual(5, callCount);
+            Assert.AreEqual(1, marshallerCount);
+        }
+
+        [Test]
+        public async Task AsyncUnaryCall_ExceedAttempts_HedgeDelay_Failure()
+        {
+            // Arrange
+            var stopwatch = new Stopwatch();
+            var callIntervals = new List<long>();
+            var hedgeDelay = TimeSpan.FromMilliseconds(100);
+
+            var callCount = 0;
+            var httpClient = ClientTestHelpers.CreateTestClient(async request =>
+            {
+                callIntervals.Add(stopwatch.ElapsedMilliseconds);
+                stopwatch.Restart();
+                Interlocked.Increment(ref callCount);
+
+                await request.Content!.CopyToAsync(new MemoryStream());
+                return ResponseUtils.CreateHeadersOnlyResponse(HttpStatusCode.OK, StatusCode.Unavailable);
+            });
+            var serviceConfig = ServiceConfigHelpers.CreateHedgingServiceConfig(maxAttempts: 2, hedgingDelay: hedgeDelay);
+            var invoker = HttpClientCallInvokerFactory.Create(httpClient, serviceConfig: serviceConfig);
+
+            // Act
+            stopwatch.Start();
+            var call = invoker.AsyncUnaryCall<HelloRequest, HelloReply>(ClientTestHelpers.ServiceMethod, string.Empty, new CallOptions(), new HelloRequest { Name = "World" });
+
+            // Assert
+            var ex = await ExceptionAssert.ThrowsAsync<RpcException>(() => call.ResponseAsync).DefaultTimeout();
+            Assert.AreEqual(2, callCount);
+            Assert.AreEqual(StatusCode.Unavailable, ex.StatusCode);
+            Assert.AreEqual(StatusCode.Unavailable, call.GetStatus().StatusCode);
+
+            // First call should happen immediately
+            Assert.LessOrEqual(callIntervals[0], hedgeDelay.TotalMilliseconds);
+
+            // Second call should happen after delay
+            Assert.GreaterOrEqual(callIntervals[1], hedgeDelay.TotalMilliseconds);
+        }
+
+        [Test]
+        public async Task AsyncUnaryCall_PushbackDelay_PushbackDelayUpdatesNextCallDelay()
+        {
+            // Arrange
+            var stopwatch = new Stopwatch();
+            var callIntervals = new List<long>();
+            var hedgingDelay = TimeSpan.FromSeconds(10);
+
+            var callCount = 0;
+            var httpClient = ClientTestHelpers.CreateTestClient(async request =>
+            {
+                callIntervals.Add(stopwatch.ElapsedMilliseconds);
+                stopwatch.Restart();
+                Interlocked.Increment(ref callCount);
+
+                await request.Content!.CopyToAsync(new MemoryStream());
+                string? hedgingPushback = null;
+                if (callCount == 1)
+                {
+                    hedgingPushback = "0";
+                }
+                return ResponseUtils.CreateHeadersOnlyResponse(HttpStatusCode.OK, StatusCode.Unavailable, retryPushbackHeader: hedgingPushback);
+            });
+            var serviceConfig = ServiceConfigHelpers.CreateHedgingServiceConfig(maxAttempts: 5, hedgingDelay: hedgingDelay);
+            var invoker = HttpClientCallInvokerFactory.Create(httpClient, serviceConfig: serviceConfig);
+
+            // Act
+            stopwatch.Start();
+            var call = invoker.AsyncUnaryCall<HelloRequest, HelloReply>(ClientTestHelpers.ServiceMethod, string.Empty, new CallOptions(), new HelloRequest { Name = "World" });
+
+            // Assert
+            await TestHelpers.AssertIsTrueRetryAsync(() => callIntervals.Count == 2, "Only two calls should be made.").DefaultTimeout();
+
+            // First call should happen immediately
+            Assert.LessOrEqual(callIntervals[0], 100);
+
+            // Second call should happen after delay
+            Assert.LessOrEqual(callIntervals[1], hedgingDelay.TotalMilliseconds);
+        }
+
+        [Test]
+        public async Task AsyncUnaryCall_FatalStatusCode_HedgeDelay_Failure()
+        {
+            // Arrange
+            var callCount = 0;
+            var httpClient = ClientTestHelpers.CreateTestClient(async request =>
+            {
+                Interlocked.Increment(ref callCount);
+
+                await request.Content!.CopyToAsync(new MemoryStream());
+                return ResponseUtils.CreateHeadersOnlyResponse(HttpStatusCode.OK, (callCount == 1) ? StatusCode.Unavailable : StatusCode.InvalidArgument);
+            });
+            var serviceConfig = ServiceConfigHelpers.CreateHedgingServiceConfig(hedgingDelay: TimeSpan.FromMilliseconds(50));
+            var invoker = HttpClientCallInvokerFactory.Create(httpClient, serviceConfig: serviceConfig);
+
+            // Act
+            var call = invoker.AsyncUnaryCall<HelloRequest, HelloReply>(ClientTestHelpers.ServiceMethod, string.Empty, new CallOptions(), new HelloRequest { Name = "World" });
+
+            // Assert
+            var ex = await ExceptionAssert.ThrowsAsync<RpcException>(() => call.ResponseAsync).DefaultTimeout();
+            Assert.AreEqual(StatusCode.InvalidArgument, ex.StatusCode);
+            Assert.AreEqual(StatusCode.InvalidArgument, call.GetStatus().StatusCode);
+            Assert.AreEqual(2, callCount);
+        }
+
+        [Test]
+        public async Task AsyncServerStreamingCall_SuccessAfterRetry_RequestContentSent()
+        {
+            // Arrange
+            var syncPoint = new SyncPoint(runContinuationsAsynchronously: true);
+            MemoryStream? requestContent = null;
+
+            var callCount = 0;
+            var httpClient = ClientTestHelpers.CreateTestClient(async request =>
+            {
+                Interlocked.Increment(ref callCount);
+
+                var s = await request.Content!.ReadAsStreamAsync();
+                var ms = new MemoryStream();
+                await s.CopyToAsync(ms);
+
+                if (callCount == 1)
+                {
+                    await syncPoint.WaitForSyncPoint();
+
+                    await request.Content!.CopyToAsync(new MemoryStream());
+                    return ResponseUtils.CreateHeadersOnlyResponse(HttpStatusCode.OK, StatusCode.Unavailable);
+                }
+
+                syncPoint.Continue();
+
+                requestContent = ms;
+
+                var reply = new HelloReply { Message = "Hello world" };
+                var streamContent = await ClientTestHelpers.CreateResponseContent(reply).DefaultTimeout();
+
+                return ResponseUtils.CreateResponse(HttpStatusCode.OK, streamContent);
+            });
+            var serviceConfig = ServiceConfigHelpers.CreateHedgingServiceConfig(maxAttempts: 2, hedgingDelay: TimeSpan.FromMilliseconds(50));
+            var invoker = HttpClientCallInvokerFactory.Create(httpClient, serviceConfig: serviceConfig);
+
+            // Act
+            var call = invoker.AsyncServerStreamingCall<HelloRequest, HelloReply>(ClientTestHelpers.GetServiceMethod(MethodType.ServerStreaming), string.Empty, new CallOptions(), new HelloRequest { Name = "World" });
+            var moveNextTask = call.ResponseStream.MoveNext(CancellationToken.None);
+
+            // Wait until the first call has failed and the second is on the server
+            await syncPoint.WaitToContinue().DefaultTimeout();
+
+            // Assert
+            Assert.IsTrue(await moveNextTask);
+            Assert.AreEqual("Hello world", call.ResponseStream.Current.Message);
+
+            requestContent!.Seek(0, SeekOrigin.Begin);
+            var requestMessage = await ReadRequestMessage(requestContent).DefaultTimeout();
+            Assert.AreEqual("World", requestMessage!.Name);
+        }
+
+        private static Task<HelloRequest?> ReadRequestMessage(Stream requestContent)
+        {
+            return StreamSerializationHelper.ReadMessageAsync(
+                requestContent,
+                ClientTestHelpers.ServiceMethod.RequestMarshaller.ContextualDeserializer,
+                GrpcProtocolConstants.IdentityGrpcEncoding,
+                maximumMessageSize: null,
+                GrpcProtocolConstants.DefaultCompressionProviders,
+                singleMessage: false,
+                CancellationToken.None).AsTask();
+        }
+    }
+}

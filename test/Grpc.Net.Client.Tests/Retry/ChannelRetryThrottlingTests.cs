@@ -23,7 +23,7 @@ using NUnit.Framework;
 namespace Grpc.Net.Client.Tests.Retry
 {
     [TestFixture]
-    public class ChannelRetryPolicyTests
+    public class ChannelRetryThrottlingTests
     {
         [Test]
         public void IsRetryThrottlingActive_FailedAndSuccessCalls_ActivatedChanges()

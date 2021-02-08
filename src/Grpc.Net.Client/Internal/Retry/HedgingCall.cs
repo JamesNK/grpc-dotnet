@@ -27,7 +27,7 @@ using Grpc.Core;
 using Grpc.Net.Client.Configuration;
 using Microsoft.Extensions.Logging;
 
-#if false
+#if true
 
 namespace Grpc.Net.Client.Internal.Retry
 {
@@ -45,20 +45,22 @@ namespace Grpc.Net.Client.Internal.Retry
         private readonly Method<TRequest, TResponse> _method;
         private readonly CallOptions _options;
         private readonly List<ReadOnlyMemory<byte>> _writtenMessages;
-        private readonly Random _random;
-        private readonly object _lock = new object();
-        private readonly CancellationTokenSource _retryCts = new CancellationTokenSource();
 
-        private int _bufferedMessagesIndex;
-        private int _attemptCount;
-        private int _nextRetryDelayMilliseconds;
-        private RetryClientStreamReader<TRequest, TResponse>? _retryClientStreamReader;
+        private readonly object _lock = new object();
+        //private readonly CancellationTokenSource _retryCts = new CancellationTokenSource();
+        private readonly TaskCompletionSource<GrpcCall<TRequest, TResponse>> _finalizedCallTcs;
+        internal Timer? _createCallTimer;
+
+        //private int _bufferedMessagesIndex;
+        //private int _attemptCount;
+        private HedgingClientStreamReader<TRequest, TResponse>? _retryClientStreamReader;
         private HedgingClientStreamWriter<TRequest, TResponse>? _retryClientStreamWriter;
 
+        public Task<GrpcCall<TRequest, TResponse>> FinalizedCallTask => _finalizedCallTcs.Task;
         public bool BufferedCurrentMessage { get; set; }
         public List<GrpcCall<TRequest, TResponse>> ActiveCalls { get; }
         public IClientStreamWriter<TRequest>? ClientStreamWriter => _retryClientStreamWriter ??= new HedgingClientStreamWriter<TRequest, TResponse>(this);
-        public IAsyncStreamReader<TResponse>? ClientStreamReader => _retryClientStreamReader ??= new RetryClientStreamReader<TRequest, TResponse>(this);
+        public IAsyncStreamReader<TResponse>? ClientStreamReader => _retryClientStreamReader ??= new HedgingClientStreamReader<TRequest, TResponse>(this);
 
         public WriteOptions? ClientStreamWriteOptions { get; internal set; }
 
@@ -78,7 +80,7 @@ namespace Grpc.Net.Client.Internal.Retry
                 }
             }
 
-            await WriteBufferedMessages(writeStream, callOptions.CancellationToken).ConfigureAwait(false);
+            await WriteBufferedMessages(call, writeStream, callOptions.CancellationToken).ConfigureAwait(false);
         }
 
         private byte[] SerializePayload(GrpcCall<TRequest, TResponse> call, CallOptions callOptions, TRequest request)
@@ -103,17 +105,6 @@ namespace Grpc.Net.Client.Internal.Retry
             }
         }
 
-        internal async ValueTask WriteBufferedMessages(Stream writeStream, CancellationToken cancellationToken)
-        {
-            while (_bufferedMessagesIndex < _writtenMessages.Count)
-            {
-                var writtenMessage = _writtenMessages[_bufferedMessagesIndex];
-
-                await ActiveCall.WriteMessageAsync(writeStream, writtenMessage, cancellationToken).ConfigureAwait(false);
-                _bufferedMessagesIndex++;
-            }
-        }
-
         public HedgingCall(HedgingPolicy hedgingPolicy, GrpcChannel channel, Method<TRequest, TResponse> method, CallOptions options)
         {
             _logger = channel.LoggerFactory.CreateLogger(LoggerName);
@@ -122,13 +113,11 @@ namespace Grpc.Net.Client.Internal.Retry
             _method = method;
             _options = options;
             _writtenMessages = new List<ReadOnlyMemory<byte>>();
-            _random = new Random();
-            _attemptCount = 1;
+            //_attemptCount = 1;
             ActiveCalls = new List<GrpcCall<TRequest, TResponse>>();
+            _finalizedCallTcs = new TaskCompletionSource<GrpcCall<TRequest, TResponse>>(TaskCreationOptions.RunContinuationsAsynchronously);
 
             ValidatePolicy(hedgingPolicy);
-
-            _nextRetryDelayMilliseconds = Convert.ToInt32(hedgingPolicy.HedgingDelay.GetValueOrDefault().TotalMilliseconds);
         }
 
         private void ValidatePolicy(HedgingPolicy hedgingPolicy)
@@ -160,77 +149,157 @@ namespace Grpc.Net.Client.Internal.Retry
             //}
         }
 
-        private readonly TaskCompletionSource<GrpcCall<TRequest, TResponse>> _finalizedCall = new TaskCompletionSource<GrpcCall<TRequest, TResponse>>(TaskCreationOptions.RunContinuationsAsynchronously);
-
-        public async Task<TResponse> GetResponseAsync()
+        private async Task StartCall(Action<GrpcCall<TRequest, TResponse>> startCallFunc)
         {
-            var call = await _finalizedCall.Task.ConfigureAwait(false);
-            return await call.GetResponseAsync().ConfigureAwait(false);
-        }
-
-        private static bool HasResponseHeaderStatus(GrpcCall<TRequest, TResponse> call)
-        {
-            return call.HttpResponse != null &&
-                GrpcProtocolHelpers.GetHeaderValue(call.HttpResponse.Headers, GrpcProtocolConstants.StatusTrailer) != null;
-        }
-
-        private Timer? _createCallTimer;
-
-        private void CreateCallCallback(object state)
-        {
-            // TODO: What happen is the timer is really small and callback is already in flight when disposing?
-            _ = StartCall();
-
-            if (_callsAttempted >= _hedgingPolicy.MaxAttempts.GetValueOrDefault())
-            {
-                _createCallTimer!.Dispose();
-            }
-        }
-
-        private async Task StartCall()
-        {
-            GrpcCall<TRequest, TResponse> call = null!;
+            GrpcCall<TRequest, TResponse> call;
             lock (_lock)
             {
+                call = HttpClientCallInvoker.CreateGrpcCall<TRequest, TResponse>(_channel, _method, _options, _callsAttempted);
                 ActiveCalls.Add(call);
                 _callsAttempted++;
             }
 
-            var status = await call.CallTask.ConfigureAwait(false);
-            if (status.StatusCode == StatusCode.OK)
+            startCallFunc(call);
+
+            Status? responseStatus;
+
+            try
             {
-                // Success. Exit retry loop.
-                _channel.RetryThrottling?.CallSuccess();
-                return;
+                call.CancellationToken.ThrowIfCancellationRequested();
+
+                Debug.Assert(call._httpResponseTask != null, "Request should have be made if call is not preemptively cancelled.");
+                var httpResponse = await call._httpResponseTask.ConfigureAwait(false);
+
+                responseStatus = GrpcCall.ValidateHeaders(httpResponse, out _);
+            }
+            catch (Exception ex)
+            {
+                call.ResolveException(GrpcCall<TRequest, TResponse>.ErrorStartingCallMessage, ex, out responseStatus, out _);
             }
 
-            var retryPushbackMS = GetRetryPushback(call);
-
-            if (_hedgingPolicy.NonFatalStatusCodes.Contains(status.StatusCode) ||
-                retryPushbackMS < 0)
+            // Check to see the response returned from the server makes the call commited
+            // Null status code indicates the headers were valid and a "Response-Headers" response
+            // was received from the server.
+            // https://github.com/grpc/proposal/blob/master/A6-client-retries.md#when-retries-are-valid
+            if (responseStatus == null)
             {
-                _channel.RetryThrottling?.CallFailure();
+                // Headers were returned. We're commited.
+                FinalizeCall(call);
+
+                responseStatus = await call.CallTask.ConfigureAwait(false);
+                if (responseStatus.GetValueOrDefault().StatusCode == StatusCode.OK)
+                {
+                    // Success. Exit retry loop.
+                    _channel.RetryThrottling?.CallSuccess();
+                }
             }
             else
             {
-                _finalizedCall.SetResult(call);
+                Status status = responseStatus.Value;
+
+                var retryPushbackMS = GetRetryPushback(call);
+
+                if (retryPushbackMS < 0)
+                {
+                    _channel.RetryThrottling?.CallFailure();
+                }
+                else if (_hedgingPolicy.NonFatalStatusCodes.Contains(status.StatusCode))
+                {
+                    if (retryPushbackMS >= 0)
+                    {
+                        lock (_lock)
+                        {
+                            _createCallTimer?.Change(
+                                TimeSpan.FromMilliseconds(retryPushbackMS.GetValueOrDefault()),
+                                _hedgingPolicy.HedgingDelay.GetValueOrDefault());
+                        }
+                    }
+                    _channel.RetryThrottling?.CallFailure();
+                }
+                else
+                {
+                    FinalizeCall(call);
+                }
+            }
+
+            lock (_lock)
+            {
+                // This is the last active call and no more will be made.
+                if (ActiveCalls.Count == 1 && _callsAttempted >= _hedgingPolicy.MaxAttempts.GetValueOrDefault())
+                {
+                    FinalizeCall(call);
+                }
+                else
+                {
+                    var removed = ActiveCalls.Remove(call);
+                    Debug.Assert(removed);
+
+                    call.Dispose();
+                }
+            }
+        }
+
+        private void FinalizeCall(GrpcCall<TRequest, TResponse> call)
+        {
+            lock (_lock)
+            {
+                var removed = ActiveCalls.Remove(call);
+                Debug.Assert(removed);
+
+                _finalizedCallTcs.SetResult(call);
+
+                CleanUp();
+            }
+        }
+
+        private void CleanUp()
+        {
+            // Stop creating calls and cancel all others in progress.
+            _createCallTimer?.Dispose();
+            _createCallTimer = null;
+            while (ActiveCalls.Count > 0)
+            {
+                ActiveCalls[ActiveCalls.Count - 1].Dispose();
+                ActiveCalls.RemoveAt(ActiveCalls.Count - 1);
             }
         }
 
         private int _callsAttempted;
 
-        private void StartCalls()
+        private void StartCalls(Action<GrpcCall<TRequest, TResponse>> startCallFunc)
         {
-            if (_hedgingPolicy.HedgingDelay.GetValueOrDefault() == TimeSpan.Zero)
+            var hedgingDelay = _hedgingPolicy.HedgingDelay.GetValueOrDefault();
+            if (hedgingDelay == TimeSpan.Zero)
             {
-                while (_callsAttempted <= _hedgingPolicy.MaxAttempts.GetValueOrDefault())
+                // If there is no delay then start all call immediately
+                while (_callsAttempted < _hedgingPolicy.MaxAttempts.GetValueOrDefault())
                 {
-                    _ = StartCall();
+                    _ = StartCall(startCallFunc);
                 }
             }
             else
             {
-                _createCallTimer = new Timer(CreateCallCallback, null, 100, 100);
+                // Create timer and set to field before setting time.
+                // Ensures there is no weird situation where the timer triggers
+                // before the field is set. 
+                _createCallTimer = new Timer(CreateCallCallback, startCallFunc, Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
+                _createCallTimer.Change(TimeSpan.Zero, hedgingDelay);
+            }
+        }
+
+        private void CreateCallCallback(object? state)
+        {
+            lock (_lock)
+            {
+                if (_callsAttempted < _hedgingPolicy.MaxAttempts.GetValueOrDefault())
+                {
+                    _ = StartCall((Action<GrpcCall<TRequest, TResponse>>)state!);
+                }
+                else
+                {
+                    _createCallTimer?.Dispose();
+                    _createCallTimer = null;
+                }
             }
         }
 
@@ -253,18 +322,23 @@ namespace Grpc.Net.Client.Internal.Retry
             return null;
         }
 
+        public async Task<TResponse> GetResponseAsync()
+        {
+            var call = await _finalizedCallTcs.Task.ConfigureAwait(false);
+            return await call.GetResponseAsync().ConfigureAwait(false);
+        }
+
         public async Task<Metadata> GetResponseHeadersAsync()
         {
-            var call = await _finalizedCall.Task.ConfigureAwait(false);
-            call.GetStatus();
+            var call = await _finalizedCallTcs.Task.ConfigureAwait(false);
             return await call.GetResponseHeadersAsync().ConfigureAwait(false);
         }
 
         public Status GetStatus()
         {
-            if (_finalizedCall.Task.IsCompletedSuccessfully)
+            if (_finalizedCallTcs.Task.IsCompletedSuccessfully)
             {
-                return _finalizedCall.Task.Result.GetStatus();
+                return _finalizedCallTcs.Task.Result.GetStatus();
             }
 
             throw new InvalidOperationException("Unable to get the status because the call is not complete.");
@@ -272,9 +346,9 @@ namespace Grpc.Net.Client.Internal.Retry
 
         public Metadata GetTrailers()
         {
-            if (_finalizedCall.Task.IsCompletedSuccessfully)
+            if (_finalizedCallTcs.Task.IsCompletedSuccessfully)
             {
-                return _finalizedCall.Task.Result.GetTrailers();
+                return _finalizedCallTcs.Task.Result.GetTrailers();
             }
 
             throw new InvalidOperationException("Can't get the call trailers because the call has not completed successfully.");
@@ -284,12 +358,7 @@ namespace Grpc.Net.Client.Internal.Retry
         {
             lock (_lock)
             {
-                _createCallTimer?.Dispose();
-
-                for (var i = 0; i < ActiveCalls.Count; i++)
-                {
-                    ActiveCalls[i].Dispose();
-                }
+                CleanUp();
             }
         }
 
@@ -300,7 +369,7 @@ namespace Grpc.Net.Client.Internal.Retry
             {
                 //Log.SendingBufferedMessages(_logger, _writtenMessages.Count);
 
-                await WriteBufferedMessages(requestStream, call.CancellationToken).ConfigureAwait(false);
+                await WriteBufferedMessages(call, requestStream, call.CancellationToken).ConfigureAwait(false);
 
                 if (clientStreamCompleted)
                 {
@@ -313,26 +382,30 @@ namespace Grpc.Net.Client.Internal.Retry
 
         public void StartUnary(TRequest request)
         {
-            //ActiveCall.StartUnaryCore(new PushUnaryContent<TRequest, TResponse>(stream => WriteNewMessage(ActiveCall, stream, ActiveCall.Options, request)));
-            StartCalls();
+            StartCalls(call =>
+            {
+                call.StartUnaryCore(new PushUnaryContent<TRequest, TResponse>(stream => WriteNewMessage(call, stream, call.Options, request)));
+            });
         }
 
         public void StartClientStreaming()
         {
             //ActiveCall.StartClientStreaming();
-            StartCalls();
+            //StartCalls();
         }
 
         public void StartServerStreaming(TRequest request)
         {
-            //ActiveCall.StartServerStreamingCore(new PushUnaryContent<TRequest, TResponse>(stream => WriteNewMessage(ActiveCall, stream, ActiveCall.Options, request)));
-            StartCalls();
+            StartCalls(call =>
+            {
+                call.StartServerStreamingCore(new PushUnaryContent<TRequest, TResponse>(stream => WriteNewMessage(call, stream, call.Options, request)));
+            });
         }
 
         public void StartDuplexStreaming()
         {
             //ActiveCall.StartDuplexStreaming();
-            StartCalls();
+            //StartCalls();
         }
 
         internal Task ClientStreamCompleteAsync()
@@ -363,6 +436,21 @@ namespace Grpc.Net.Client.Internal.Retry
 
             await Task.WhenAll(writeTasks).ConfigureAwait(false);
             BufferedCurrentMessage = false;
+        }
+
+        internal async ValueTask WriteBufferedMessages(GrpcCall<TRequest, TResponse> call, Stream writeStream, CancellationToken cancellationToken)
+        {
+            foreach (var writtenMessage in _writtenMessages)
+            {
+                await call.WriteMessageAsync(writeStream, writtenMessage, cancellationToken).ConfigureAwait(false);
+            }
+            //while (_bufferedMessagesIndex < _writtenMessages.Count)
+            //{
+            //    var writtenMessage = _writtenMessages[_bufferedMessagesIndex];
+
+            //    await call.WriteMessageAsync(writeStream, writtenMessage, cancellationToken).ConfigureAwait(false);
+            //    _bufferedMessagesIndex++;
+            //}
         }
     }
 }

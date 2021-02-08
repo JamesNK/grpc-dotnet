@@ -286,28 +286,28 @@ namespace Grpc.Net.Client.Internal.Retry
                     var httpResponse = await ActiveCall._httpResponseTask.ConfigureAwait(false);
 
                     responseStatus = GrpcCall.ValidateHeaders(httpResponse, out _);
-
-                    // Check to see the response returned from the server makes the call commited
-                    // Null status code indicates the headers were valid and a "Response-Headers" response
-                    // was received from the server.
-                    // https://github.com/grpc/proposal/blob/master/A6-client-retries.md#when-retries-are-valid
-                    if (responseStatus == null)
-                    {
-                        // Headers were returned. We're commited.
-                        _finalizedCallTcs.SetResult(ActiveCall);
-
-                        responseStatus = await ActiveCall.CallTask.ConfigureAwait(false);
-                        if (responseStatus.GetValueOrDefault().StatusCode == StatusCode.OK)
-                        {
-                            // Success. Exit retry loop.
-                            _channel.RetryThrottling?.CallSuccess();
-                        }
-                        return;
-                    }
                 }
                 catch (Exception ex)
                 {
                     ActiveCall.ResolveException(GrpcCall<TRequest, TResponse>.ErrorStartingCallMessage, ex, out responseStatus, out _);
+                }
+
+                // Check to see the response returned from the server makes the call commited
+                // Null status code indicates the headers were valid and a "Response-Headers" response
+                // was received from the server.
+                // https://github.com/grpc/proposal/blob/master/A6-client-retries.md#when-retries-are-valid
+                if (responseStatus == null)
+                {
+                    // Headers were returned. We're commited.
+                    _finalizedCallTcs.SetResult(ActiveCall);
+
+                    responseStatus = await ActiveCall.CallTask.ConfigureAwait(false);
+                    if (responseStatus.GetValueOrDefault().StatusCode == StatusCode.OK)
+                    {
+                        // Success. Exit retry loop.
+                        _channel.RetryThrottling?.CallSuccess();
+                    }
+                    return;
                 }
 
                 Status status = responseStatus.Value;

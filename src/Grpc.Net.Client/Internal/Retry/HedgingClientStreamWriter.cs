@@ -16,7 +16,7 @@
 
 #endregion
 
-#if false
+#if true
 
 using System.Threading.Tasks;
 using Grpc.Core;
@@ -34,7 +34,7 @@ namespace Grpc.Net.Client.Internal.Retry
             _hedgingCall = retryCall;
         }
 
-        public WriteOptions WriteOptions
+        public WriteOptions? WriteOptions
         {
             get => _hedgingCall.ClientStreamWriteOptions;
             set => _hedgingCall.ClientStreamWriteOptions = value;

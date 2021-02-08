@@ -39,9 +39,9 @@ namespace Grpc.Tests.Shared
 
         public static readonly Method<HelloRequest, HelloReply> ServiceMethod = GetServiceMethod(MethodType.Unary);
 
-        public static Method<HelloRequest, HelloReply> GetServiceMethod(MethodType methodType)
+        public static Method<HelloRequest, HelloReply> GetServiceMethod(MethodType? methodType = null, Marshaller<HelloRequest>? requestMarshaller = null)
         {
-            return new Method<HelloRequest, HelloReply>(methodType, "ServiceName", "MethodName", HelloRequestMarshaller, HelloReplyMarshaller);
+            return new Method<HelloRequest, HelloReply>(methodType ?? MethodType.Unary, "ServiceName", "MethodName", requestMarshaller ?? HelloRequestMarshaller, HelloReplyMarshaller);
         }
 
         public static TestHttpMessageHandler CreateTestMessageHandler(HelloReply reply)

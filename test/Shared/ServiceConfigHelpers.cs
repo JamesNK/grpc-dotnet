@@ -25,7 +25,7 @@ namespace Grpc.Tests.Shared
 {
     internal static class ServiceConfigHelpers
     {
-        public static ServiceConfig CreateServiceConfig(
+        public static ServiceConfig CreateRetryServiceConfig(
             int? maxAttempts = null,
             TimeSpan? initialBackoff = null,
             TimeSpan? maxBackoff = null,
@@ -61,6 +61,44 @@ namespace Grpc.Tests.Shared
                     {
                         Names = { Name.All },
                         RetryPolicy = retryPolicy
+                    }
+                },
+                RetryThrottling = retryThrottling
+            };
+        }
+
+        public static ServiceConfig CreateHedgingServiceConfig(
+            int? maxAttempts = null,
+            TimeSpan? hedgingDelay = null,
+            IList<StatusCode>? nonFatalStatusCodes = null,
+            RetryThrottlingPolicy? retryThrottling = null)
+        {
+            var hedgingPolicy = new HedgingPolicy
+            {
+                MaxAttempts = maxAttempts ?? 5,
+                HedgingDelay = hedgingDelay ?? TimeSpan.Zero
+            };
+
+            if (nonFatalStatusCodes != null)
+            {
+                foreach (var statusCode in nonFatalStatusCodes)
+                {
+                    hedgingPolicy.NonFatalStatusCodes.Add(statusCode);
+                }
+            }
+            else
+            {
+                hedgingPolicy.NonFatalStatusCodes.Add(StatusCode.Unavailable);
+            }
+
+            return new ServiceConfig
+            {
+                MethodConfigs =
+                {
+                    new MethodConfig
+                    {
+                        Names = { Name.All },
+                        HedgingPolicy = hedgingPolicy
                     }
                 },
                 RetryThrottling = retryThrottling

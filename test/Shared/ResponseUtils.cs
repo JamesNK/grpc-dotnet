@@ -52,7 +52,8 @@ namespace Grpc.Tests.Shared
             string? grpcEncoding = null,
             Version? version = null,
             string? retryPushbackHeader = null,
-            IDictionary<string, string>? customHeaders = null)
+            IDictionary<string, string>? customHeaders = null,
+            IDictionary<string, string>? customTrailers = null)
         {
             payload.Headers.ContentType = GrpcContentTypeHeaderValue;
 
@@ -79,6 +80,14 @@ namespace Grpc.Tests.Shared
             if (grpcStatusCode != null)
             {
                 message.TrailingHeaders.Add(StatusTrailer, grpcStatusCode.Value.ToString("D"));
+            }
+
+            if (customTrailers != null)
+            {
+                foreach (var customTrailer in customTrailers)
+                {
+                    message.TrailingHeaders.Add(customTrailer.Key, customTrailer.Value);
+                }
             }
 
             return message;
