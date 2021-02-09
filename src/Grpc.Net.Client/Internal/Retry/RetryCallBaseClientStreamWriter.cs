@@ -16,39 +16,36 @@
 
 #endregion
 
-#if true
-
 using System.Threading.Tasks;
 using Grpc.Core;
 
 namespace Grpc.Net.Client.Internal.Retry
 {
-    internal class HedgingClientStreamWriter<TRequest, TResponse> : IClientStreamWriter<TRequest>
+    internal class RetryCallBaseClientStreamWriter<TRequest, TResponse> : IClientStreamWriter<TRequest>
         where TRequest : class
         where TResponse : class
     {
-        private readonly HedgingCall<TRequest, TResponse> _hedgingCall;
+        private readonly RetryCallBase<TRequest, TResponse> _retryCallBase;
 
-        public HedgingClientStreamWriter(HedgingCall<TRequest, TResponse> retryCall)
+        public RetryCallBaseClientStreamWriter(RetryCallBase<TRequest, TResponse> retryCallBase)
         {
-            _hedgingCall = retryCall;
+            _retryCallBase = retryCallBase;
         }
 
         public WriteOptions? WriteOptions
         {
-            get => _hedgingCall.ClientStreamWriteOptions;
-            set => _hedgingCall.ClientStreamWriteOptions = value;
+            get => _retryCallBase.ClientStreamWriteOptions;
+            set => _retryCallBase.ClientStreamWriteOptions = value;
         }
 
         public Task CompleteAsync()
         {
-            return _hedgingCall.ClientStreamCompleteAsync();
+            return _retryCallBase.ClientStreamCompleteAsync();
         }
 
         public Task WriteAsync(TRequest message)
         {
-            return _hedgingCall.ClientStreamWriteAsync(message);
+            return _retryCallBase.ClientStreamWriteAsync(message);
         }
     }
 }
-#endif

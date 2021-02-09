@@ -22,11 +22,11 @@ using Microsoft.Extensions.Logging;
 
 namespace Grpc.Net.Client.Internal.Retry
 {
-    internal partial class RetryCall<TRequest, TResponse> : IGrpcCall<TRequest, TResponse>
+    internal partial class RetryCallBase<TRequest, TResponse> : IGrpcCall<TRequest, TResponse>
         where TRequest : class
         where TResponse : class
     {
-        private static class Log
+        protected static class Log
         {
             private static readonly Action<ILogger, StatusCode, int, RetryResult, Exception?> _retryEvaluated =
                 LoggerMessage.Define<StatusCode, int, RetryResult>(LogLevel.Debug, new EventId(1, "RetryEvaluated"), "Evaluated retry decision for failed gRPC call. Status code: '{StatusCode}', Attempt: {AttemptCount}, Decision: {RetryResult}");

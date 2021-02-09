@@ -100,7 +100,7 @@ namespace Grpc.Net.Client.Internal
         IClientStreamWriter<TRequest>? IGrpcCall<TRequest, TResponse>.ClientStreamWriter => ClientStreamWriter;
         IAsyncStreamReader<TResponse>? IGrpcCall<TRequest, TResponse>.ClientStreamReader => ClientStreamReader;
 
-        public void StartRetry(bool clientStreamCompleted, Func<Stream, ValueTask> startCallback)
+        public void StartRetry(Func<Stream, ValueTask> startCallback)
         {
             switch (Method.Type)
             {
@@ -112,7 +112,6 @@ namespace Grpc.Net.Client.Internal
                 case MethodType.ClientStreaming:
                     {
                         var clientStreamWriter = new HttpContentClientStreamWriter<TRequest, TResponse>(this);
-                        clientStreamWriter.CompleteCalled = clientStreamCompleted;
                         var content = new PushStreamContent<TRequest, TResponse>(clientStreamWriter, startCallback);
                         StartClientStreamingCore(clientStreamWriter, content);
                         break;
@@ -179,7 +178,7 @@ namespace Grpc.Net.Client.Internal
             _ = RunCall(message, timeout);
         }
 
-        private void StartClientStreamingCore(HttpContentClientStreamWriter<TRequest, TResponse> clientStreamWriter, HttpContent content)
+        internal void StartClientStreamingCore(HttpContentClientStreamWriter<TRequest, TResponse> clientStreamWriter, HttpContent content)
         {
             _responseTcs = new TaskCompletionSource<TResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
 

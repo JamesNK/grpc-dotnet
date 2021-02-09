@@ -18,17 +18,13 @@
 
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Net;
-using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
-using Google.Protobuf;
 using Greet;
 using Grpc.Core;
-using Grpc.Net.Client.Configuration;
 using Grpc.Net.Client.Internal;
 using Grpc.Net.Client.Internal.Retry;
 using Grpc.Net.Client.Tests.Infrastructure;
@@ -86,6 +82,7 @@ namespace Grpc.Net.Client.Tests.Retry
 
             waitUntilFinishedTcs.SetResult(null);
         }
+
         [Test]
         public async Task ActiveCalls_FatalStatusCode_CleansUpActiveCalls()
         {
@@ -118,15 +115,9 @@ namespace Grpc.Net.Client.Tests.Retry
 
                 throw new InvalidOperationException("Should never reach here.");
             });
-            var serviceConfig = ServiceConfigHelpers.CreateHedgingServiceConfig(maxAttempts: 1);
+            var serviceConfig = ServiceConfigHelpers.CreateHedgingServiceConfig(maxAttempts: 5, hedgingDelay: TimeSpan.FromMilliseconds(20));
             var invoker = HttpClientCallInvokerFactory.Create(httpClient, serviceConfig: serviceConfig);
-            var hedgingPolicy = new HedgingPolicy
-            {
-                HedgingDelay = TimeSpan.FromMilliseconds(20),
-                MaxAttempts = 5,
-                NonFatalStatusCodes = { StatusCode.Unavailable }
-            };
-            var hedgingCall = new HedgingCall<HelloRequest, HelloReply>(hedgingPolicy, invoker.Channel, ClientTestHelpers.ServiceMethod, new CallOptions());
+            var hedgingCall = new HedgingCall<HelloRequest, HelloReply>(serviceConfig.MethodConfigs[0].HedgingPolicy!, invoker.Channel, ClientTestHelpers.ServiceMethod, new CallOptions());
 
             // Act
             hedgingCall.StartUnary(new HelloRequest { Name = "World" });
@@ -150,6 +141,71 @@ namespace Grpc.Net.Client.Tests.Retry
             Assert.IsNull(hedgingCall._createCallTimer);
 
             waitUntilFinishedTcs.SetResult(null);
+        }
+
+        [Test]
+        public async Task ClientStreamWriteAsync_NoActiveCalls_WaitsForNextCall()
+        {
+            // Arrange
+            var allCallsOnServerSyncPoint = new SyncPoint(runContinuationsAsynchronously: true);
+            var callLock = new object();
+
+            var callCount = 0;
+            var httpClient = ClientTestHelpers.CreateTestClient(async request =>
+            {
+                var content = (PushStreamContent<HelloRequest, HelloReply>)request.Content!;
+                _ = content.ReadAsStreamAsync();
+
+                // All calls are in-progress at once.
+                bool firstCallsOnServer = false;
+                lock (callLock)
+                {
+                    callCount++;
+                    if (callCount == 1)
+                    {
+                        firstCallsOnServer = true;
+                    }
+                }
+                if (firstCallsOnServer)
+                {
+                    await allCallsOnServerSyncPoint.WaitToContinue();
+                    return ResponseUtils.CreateHeadersOnlyResponse(HttpStatusCode.OK, StatusCode.Unavailable);
+                }
+
+                await content.PushComplete.DefaultTimeout();
+
+                var reply = new HelloReply { Message = "Hello world" };
+                var streamContent = await ClientTestHelpers.CreateResponseContent(reply).DefaultTimeout();
+                return ResponseUtils.CreateResponse(HttpStatusCode.OK, streamContent);
+            });
+            var serviceConfig = ServiceConfigHelpers.CreateHedgingServiceConfig(maxAttempts: 5, hedgingDelay: TimeSpan.FromMilliseconds(200));
+            var invoker = HttpClientCallInvokerFactory.Create(httpClient, serviceConfig: serviceConfig);
+            var hedgingCall = new HedgingCall<HelloRequest, HelloReply>(serviceConfig.MethodConfigs[0].HedgingPolicy!, invoker.Channel, ClientTestHelpers.GetServiceMethod(MethodType.ClientStreaming), new CallOptions());
+
+            // Act
+            hedgingCall.StartClientStreaming();
+            await hedgingCall.ClientStreamWriter!.WriteAsync(new HelloRequest { Name = "Name 1" }).DefaultTimeout();
+
+            // Assert
+            Assert.AreEqual(1, hedgingCall.ActiveCalls.Count);
+            Assert.IsNotNull(hedgingCall._createCallTimer);
+
+            await allCallsOnServerSyncPoint.WaitForSyncPoint().DefaultTimeout();
+            allCallsOnServerSyncPoint.Continue();
+
+            await TestHelpers.AssertIsTrueRetryAsync(() => hedgingCall.ActiveCalls.Count == 0, "Call should finish and then wait until next call.");
+
+            // This call will wait until next hedging call starts
+            await hedgingCall.ClientStreamWriter!.WriteAsync(new HelloRequest { Name = "Name 2" }).DefaultTimeout();
+            Assert.AreEqual(1, hedgingCall.ActiveCalls.Count);
+
+            await hedgingCall.ClientStreamWriter!.CompleteAsync().DefaultTimeout();
+
+            var responseMessage = await hedgingCall.GetResponseAsync().DefaultTimeout();
+            Assert.AreEqual("Hello world", responseMessage.Message);
+
+            Assert.AreEqual(0, hedgingCall.ActiveCalls.Count);
+            Assert.IsNull(hedgingCall._createCallTimer);
         }
 
         [Test]

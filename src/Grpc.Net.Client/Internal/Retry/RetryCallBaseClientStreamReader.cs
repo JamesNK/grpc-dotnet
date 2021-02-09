@@ -22,27 +22,27 @@ using Grpc.Core;
 
 namespace Grpc.Net.Client.Internal.Retry
 {
-    internal class HedgingClientStreamReader<TRequest, TResponse> : IAsyncStreamReader<TResponse>
+    internal class RetryCallBaseClientStreamReader<TRequest, TResponse> : IAsyncStreamReader<TResponse>
         where TRequest : class
         where TResponse : class
     {
-        private readonly HedgingCall<TRequest, TResponse> _hedgingCall;
+        private readonly RetryCallBase<TRequest, TResponse> _retryCallBase;
 
-        public HedgingClientStreamReader(HedgingCall<TRequest, TResponse> hedgingCall)
+        public RetryCallBaseClientStreamReader(RetryCallBase<TRequest, TResponse> retryCallBase)
         {
-            _hedgingCall = hedgingCall;
+            _retryCallBase = retryCallBase;
         }
 
         // Suppress warning when overriding interface definition
 #pragma warning disable CS8613, CS8766 // Nullability of reference types in return type doesn't match implicitly implemented member.
-        public TResponse? Current => _hedgingCall.FinalizedCallTask.IsCompletedSuccessfully
-                    ? _hedgingCall.FinalizedCallTask.Result.ClientStreamReader!.Current
+        public TResponse? Current => _retryCallBase.FinalizedCallTask.IsCompletedSuccessfully
+                    ? _retryCallBase.FinalizedCallTask.Result.ClientStreamReader!.Current
                     : null;
 #pragma warning restore CS8613, CS8766 // Nullability of reference types in return type doesn't match implicitly implemented member.
 
         public async Task<bool> MoveNext(CancellationToken cancellationToken)
         {
-            var call = await _hedgingCall.FinalizedCallTask.ConfigureAwait(false);
+            var call = await _retryCallBase.FinalizedCallTask.ConfigureAwait(false);
             return await call.ClientStreamReader!.MoveNext(cancellationToken).ConfigureAwait(false);
         }
     }

@@ -20,15 +20,12 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
-using System.Linq;
 using System.Net;
-using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
 using Google.Protobuf;
 using Greet;
 using Grpc.Core;
-using Grpc.Net.Client.Configuration;
 using Grpc.Net.Client.Internal;
 using Grpc.Net.Client.Tests.Infrastructure;
 using Grpc.Tests.Shared;
@@ -301,6 +298,76 @@ namespace Grpc.Net.Client.Tests.Retry
             requestContent!.Seek(0, SeekOrigin.Begin);
             var requestMessage = await ReadRequestMessage(requestContent).DefaultTimeout();
             Assert.AreEqual("World", requestMessage!.Name);
+        }
+
+        [TestCase(0)]
+        [TestCase(1)]
+        [TestCase(100)]
+        public async Task AsyncClientStreamingCall_SuccessAfterRetry_RequestContentSent(int hedingDelayMS)
+        {
+            // Arrange
+            var callLock = new object();
+            var requestContent = new MemoryStream();
+
+            var callCount = 0;
+            var httpClient = ClientTestHelpers.CreateTestClient(async request =>
+            {
+                var firstCall = false;
+                lock (callLock)
+                {
+                    callCount++;
+                    if (callCount == 1)
+                    {
+                        firstCall = true;
+                    }
+                }
+                if (firstCall)
+                {
+                    await request.Content!.CopyToAsync(new MemoryStream());
+                    return ResponseUtils.CreateHeadersOnlyResponse(HttpStatusCode.OK, StatusCode.Unavailable);
+                }
+
+                var content = (PushStreamContent<HelloRequest, HelloReply>)request.Content!;
+                await content.PushComplete.DefaultTimeout();
+
+                await request.Content!.CopyToAsync(requestContent);
+
+                var reply = new HelloReply { Message = "Hello world" };
+                var streamContent = await ClientTestHelpers.CreateResponseContent(reply).DefaultTimeout();
+
+                return ResponseUtils.CreateResponse(HttpStatusCode.OK, streamContent);
+            });
+            var serviceConfig = ServiceConfigHelpers.CreateHedgingServiceConfig(maxAttempts: 2, hedgingDelay: TimeSpan.FromMilliseconds(hedingDelayMS));
+            var invoker = HttpClientCallInvokerFactory.Create(httpClient, serviceConfig: serviceConfig);
+
+            // Act
+            var call = invoker.AsyncClientStreamingCall<HelloRequest, HelloReply>(ClientTestHelpers.GetServiceMethod(MethodType.ClientStreaming), string.Empty, new CallOptions());
+
+            // Assert
+            Assert.IsNotNull(call);
+
+            var responseTask = call.ResponseAsync;
+            Assert.IsFalse(responseTask.IsCompleted, "Response not returned until client stream is complete.");
+
+
+            await call.RequestStream.WriteAsync(new HelloRequest { Name = "1" }).DefaultTimeout();
+            await call.RequestStream.WriteAsync(new HelloRequest { Name = "2" }).DefaultTimeout();
+
+            await call.RequestStream.CompleteAsync().DefaultTimeout();
+
+            var responseMessage = await responseTask.DefaultTimeout();
+            Assert.AreEqual("Hello world", responseMessage.Message);
+
+            requestContent!.Seek(0, SeekOrigin.Begin);
+
+            var requestMessage = await ReadRequestMessage(requestContent).DefaultTimeout();
+            Assert.IsNotNull(requestMessage);
+            Assert.AreEqual("1", requestMessage!.Name);
+            requestMessage = await ReadRequestMessage(requestContent).DefaultTimeout();
+            Assert.IsNotNull(requestMessage);
+            Assert.AreEqual("2", requestMessage!.Name);
+            requestMessage = await ReadRequestMessage(requestContent).DefaultTimeout();
+            Assert.IsNull(requestMessage);
         }
 
         private static Task<HelloRequest?> ReadRequestMessage(Stream requestContent)
