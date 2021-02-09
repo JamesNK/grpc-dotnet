@@ -17,7 +17,10 @@
 #endregion
 
 using System;
+using System.Collections.Generic;
+using System.IO;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using Grpc.Core;
 using Microsoft.Extensions.Logging;
@@ -36,12 +39,18 @@ namespace Grpc.Net.Client.Internal.Retry
         protected Method<TRequest, TResponse> Method { get; }
         protected CallOptions Options { get; }
         protected TaskCompletionSource<GrpcCall<TRequest, TResponse>> FinalizedCallTcs { get; }
-        public Task<GrpcCall<TRequest, TResponse>> FinalizedCallTask => FinalizedCallTcs.Task;
 
+        public Task<GrpcCall<TRequest, TResponse>> FinalizedCallTask => FinalizedCallTcs.Task;
         public IAsyncStreamReader<TResponse>? ClientStreamReader => _retryBaseClientStreamReader ??= new RetryCallBaseClientStreamReader<TRequest, TResponse>(this);
         public IClientStreamWriter<TRequest>? ClientStreamWriter => _retryBaseClientStreamWriter ??= new RetryCallBaseClientStreamWriter<TRequest, TResponse>(this);
         public WriteOptions? ClientStreamWriteOptions { get; internal set; }
-        public bool ClientStreamComplete { get; protected set; }
+
+        protected bool ClientStreamComplete { get; set; }
+
+        protected readonly List<ReadOnlyMemory<byte>> WrittenMessages;
+        protected bool BufferedCurrentMessage { get; set; }
+
+        protected object Lock { get; } = new object();
 
         protected RetryCallBase(GrpcChannel channel, Method<TRequest, TResponse> method, CallOptions options, string loggerName)
         {
@@ -50,6 +59,7 @@ namespace Grpc.Net.Client.Internal.Retry
             Method = method;
             Options = options;
             FinalizedCallTcs = new TaskCompletionSource<GrpcCall<TRequest, TResponse>>(TaskCreationOptions.RunContinuationsAsynchronously);
+            WrittenMessages = new List<ReadOnlyMemory<byte>>();
         }
 
         public async Task<TResponse> GetResponseAsync()
@@ -86,17 +96,69 @@ namespace Grpc.Net.Client.Internal.Retry
 
         public abstract void Dispose();
 
-        public abstract void StartUnary(TRequest request);
+        public void StartUnary(TRequest request)
+        {
+            StartCore(call =>
+            {
+                call.StartUnaryCore(new PushUnaryContent<TRequest, TResponse>(stream => WriteNewMessage(call, stream, call.Options, request)));
+            });
+        }
 
-        public abstract void StartClientStreaming();
+        public void StartClientStreaming()
+        {
+            StartCore(call =>
+            {
+                var clientStreamWriter = new HttpContentClientStreamWriter<TRequest, TResponse>(call);
+                var content = new PushStreamContent<TRequest, TResponse>(clientStreamWriter, async requestStream =>
+                {
+                    //Log.SendingBufferedMessages(_logger, _writtenMessages.Count);
+                    Console.WriteLine("PushStreamStart");
+                    await WriteBufferedMessages(call, requestStream, call.CancellationToken).ConfigureAwait(false);
 
-        public abstract void StartServerStreaming(TRequest request);
+                    if (ClientStreamComplete)
+                    {
+                        await call.ClientStreamWriter!.CompleteAsync().ConfigureAwait(false);
+                    }
+                });
+                call.StartClientStreamingCore(clientStreamWriter, content);
+            });
+        }
 
-        public abstract void StartDuplexStreaming();
+        public void StartServerStreaming(TRequest request)
+        {
+            StartCore(call =>
+            {
+                call.StartServerStreamingCore(new PushUnaryContent<TRequest, TResponse>(stream => WriteNewMessage(call, stream, call.Options, request)));
+            });
+        }
+
+        public void StartDuplexStreaming()
+        {
+            StartCore(call =>
+            {
+                var clientStreamWriter = new HttpContentClientStreamWriter<TRequest, TResponse>(call);
+                var content = new PushStreamContent<TRequest, TResponse>(clientStreamWriter, async requestStream =>
+                {
+                    //Log.SendingBufferedMessages(_logger, _writtenMessages.Count);
+                    Console.WriteLine("PushStreamStart");
+                    await WriteBufferedMessages(call, requestStream, call.CancellationToken).ConfigureAwait(false);
+
+                    if (ClientStreamComplete)
+                    {
+                        await call.ClientStreamWriter!.CompleteAsync().ConfigureAwait(false);
+                    }
+                });
+                call.StartDuplexStreamingCore(clientStreamWriter, content);
+            });
+        }
+
+        protected abstract void StartCore(Action<GrpcCall<TRequest, TResponse>> startCallFunc);
 
         public abstract Task ClientStreamCompleteAsync();
 
         public abstract Task ClientStreamWriteAsync(TRequest message);
+
+        protected abstract ValueTask WriteBufferedMessages(GrpcCall<TRequest, TResponse> call, Stream writeStream, CancellationToken cancellationToken);
 
         protected int? GetRetryPushback(GrpcCall<TRequest, TResponse> call)
         {
@@ -138,5 +200,28 @@ namespace Grpc.Net.Client.Internal.Retry
                 serializationContext.Reset();
             }
         }
+
+        protected async ValueTask WriteNewMessage(GrpcCall<TRequest, TResponse> call, Stream writeStream, CallOptions callOptions, TRequest message)
+        {
+            // Serialize current message and add to the buffer.
+            if (!BufferedCurrentMessage)
+            {
+                lock (Lock)
+                {
+                    if (!BufferedCurrentMessage)
+                    {
+                        var payload = SerializePayload(call, callOptions, message);
+                        WrittenMessages.Add(payload);
+                        BufferedCurrentMessage = true;
+
+                        Console.WriteLine($"Serialized and buffered message. New buffer count {WrittenMessages.Count}");
+                    }
+                }
+            }
+
+            await call.WriteMessageAsync(writeStream, WrittenMessages[WrittenMessages.Count - 1], callOptions.CancellationToken).ConfigureAwait(false);
+            //await WriteBufferedMessages(call, writeStream, callOptions.CancellationToken).ConfigureAwait(false);
+        }
+
     }
 }

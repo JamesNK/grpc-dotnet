@@ -69,15 +69,15 @@ namespace Grpc.Net.Client.Tests.Retry
             Assert.IsNotNull(hedgingCall._createCallTimer);
 
             // Assert
-            Assert.AreEqual(1, hedgingCall.ActiveCalls.Count);
+            Assert.AreEqual(1, hedgingCall._activeCalls.Count);
 
             await allCallsOnServerTcs.Task.DefaultTimeout();
 
             Assert.AreEqual(5, callCount);
-            Assert.AreEqual(5, hedgingCall.ActiveCalls.Count);
+            Assert.AreEqual(5, hedgingCall._activeCalls.Count);
 
             hedgingCall.Dispose();
-            Assert.AreEqual(0, hedgingCall.ActiveCalls.Count);
+            Assert.AreEqual(0, hedgingCall._activeCalls.Count);
             Assert.IsNull(hedgingCall._createCallTimer);
 
             waitUntilFinishedTcs.SetResult(null);
@@ -123,13 +123,13 @@ namespace Grpc.Net.Client.Tests.Retry
             hedgingCall.StartUnary(new HelloRequest { Name = "World" });
 
             // Assert
-            Assert.AreEqual(1, hedgingCall.ActiveCalls.Count);
+            Assert.AreEqual(1, hedgingCall._activeCalls.Count);
             Assert.IsNotNull(hedgingCall._createCallTimer);
 
             await allCallsOnServerSyncPoint.WaitForSyncPoint().DefaultTimeout();
 
             Assert.AreEqual(5, callCount);
-            Assert.AreEqual(5, hedgingCall.ActiveCalls.Count);
+            Assert.AreEqual(5, hedgingCall._activeCalls.Count);
 
             allCallsOnServerSyncPoint.Continue();
 
@@ -137,7 +137,7 @@ namespace Grpc.Net.Client.Tests.Retry
             Assert.AreEqual(StatusCode.InvalidArgument, ex.StatusCode);
 
             // Fatal status code will cancel other calls
-            Assert.AreEqual(0, hedgingCall.ActiveCalls.Count);
+            Assert.AreEqual(0, hedgingCall._activeCalls.Count);
             Assert.IsNull(hedgingCall._createCallTimer);
 
             waitUntilFinishedTcs.SetResult(null);
@@ -187,24 +187,24 @@ namespace Grpc.Net.Client.Tests.Retry
             await hedgingCall.ClientStreamWriter!.WriteAsync(new HelloRequest { Name = "Name 1" }).DefaultTimeout();
 
             // Assert
-            Assert.AreEqual(1, hedgingCall.ActiveCalls.Count);
+            Assert.AreEqual(1, hedgingCall._activeCalls.Count);
             Assert.IsNotNull(hedgingCall._createCallTimer);
 
             await allCallsOnServerSyncPoint.WaitForSyncPoint().DefaultTimeout();
             allCallsOnServerSyncPoint.Continue();
 
-            await TestHelpers.AssertIsTrueRetryAsync(() => hedgingCall.ActiveCalls.Count == 0, "Call should finish and then wait until next call.");
+            await TestHelpers.AssertIsTrueRetryAsync(() => hedgingCall._activeCalls.Count == 0, "Call should finish and then wait until next call.");
 
             // This call will wait until next hedging call starts
             await hedgingCall.ClientStreamWriter!.WriteAsync(new HelloRequest { Name = "Name 2" }).DefaultTimeout();
-            Assert.AreEqual(1, hedgingCall.ActiveCalls.Count);
+            Assert.AreEqual(1, hedgingCall._activeCalls.Count);
 
             await hedgingCall.ClientStreamWriter!.CompleteAsync().DefaultTimeout();
 
             var responseMessage = await hedgingCall.GetResponseAsync().DefaultTimeout();
             Assert.AreEqual("Hello world", responseMessage.Message);
 
-            Assert.AreEqual(0, hedgingCall.ActiveCalls.Count);
+            Assert.AreEqual(0, hedgingCall._activeCalls.Count);
             Assert.IsNull(hedgingCall._createCallTimer);
         }
 
@@ -256,14 +256,14 @@ namespace Grpc.Net.Client.Tests.Retry
             await allCallsOnServerTcs.Task;
 
             // Assert
-            await TestHelpers.AssertIsTrueRetryAsync(() => hedgingCall.ActiveCalls.Count == 1, "Wait for pushback to be returned.");
+            await TestHelpers.AssertIsTrueRetryAsync(() => hedgingCall._activeCalls.Count == 1, "Wait for pushback to be returned.");
             returnSuccessTcs.SetResult(null);
 
             var rs = await hedgingCall.GetResponseAsync().DefaultTimeout();
             Assert.AreEqual("Hello world", rs.Message);
             Assert.AreEqual(StatusCode.OK, hedgingCall.GetStatus().StatusCode);
             Assert.AreEqual(2, callCount);
-            Assert.AreEqual(0, hedgingCall.ActiveCalls.Count);
+            Assert.AreEqual(0, hedgingCall._activeCalls.Count);
         }
     }
 }

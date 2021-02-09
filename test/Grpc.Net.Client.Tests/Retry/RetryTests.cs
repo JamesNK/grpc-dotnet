@@ -140,7 +140,7 @@ namespace Grpc.Net.Client.Tests.Retry
             var headersTask = call.ResponseHeadersAsync;
 
             // Wait until the first call has failed and the second is on the server
-            await syncPoint.WaitToContinue();
+            await syncPoint.WaitToContinue().DefaultTimeout();
 
             // Assert
             Assert.AreEqual(2, callCount);

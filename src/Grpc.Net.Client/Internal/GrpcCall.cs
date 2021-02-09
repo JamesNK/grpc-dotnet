@@ -100,39 +100,6 @@ namespace Grpc.Net.Client.Internal
         IClientStreamWriter<TRequest>? IGrpcCall<TRequest, TResponse>.ClientStreamWriter => ClientStreamWriter;
         IAsyncStreamReader<TResponse>? IGrpcCall<TRequest, TResponse>.ClientStreamReader => ClientStreamReader;
 
-        public void StartRetry(Func<Stream, ValueTask> startCallback)
-        {
-            switch (Method.Type)
-            {
-                case MethodType.Unary:
-                    {
-                        StartUnaryCore(new PushUnaryContent<TRequest, TResponse>(startCallback));
-                        break;
-                    }
-                case MethodType.ClientStreaming:
-                    {
-                        var clientStreamWriter = new HttpContentClientStreamWriter<TRequest, TResponse>(this);
-                        var content = new PushStreamContent<TRequest, TResponse>(clientStreamWriter, startCallback);
-                        StartClientStreamingCore(clientStreamWriter, content);
-                        break;
-                    }
-                case MethodType.ServerStreaming:
-                    {
-                        StartServerStreamingCore(new PushUnaryContent<TRequest, TResponse>(startCallback));
-                        break;
-                    }
-                case MethodType.DuplexStreaming:
-                    {
-                        var clientStreamWriter = new HttpContentClientStreamWriter<TRequest, TResponse>(this);
-                        var content = new PushStreamContent<TRequest, TResponse>(clientStreamWriter, startCallback);
-                        StartDuplexStreamingCore(clientStreamWriter, content);
-                        break;
-                    }
-                default:
-                    throw new InvalidOperationException($"Unexpected method type: {Method.Type}");
-            }
-        }
-
         public void StartUnary(TRequest request) => StartUnaryCore(new PushUnaryContent<TRequest, TResponse>(stream =>
         {
             return WriteMessageAsync(stream, request, Options);
