@@ -228,32 +228,5 @@ namespace Grpc.AspNetCore.FunctionalTests.Client
 
             tcs.SetResult(new DataMessage());
         }
-
-        //[Test]
-        //public async Task Unary_DeadlineExceed_Failure()
-        //{
-        //    // Arrange
-
-        //    var callCount = 0;
-        //    var httpClient = ClientTestHelpers.CreateTestClient(async request =>
-        //    {
-        //        callCount++;
-        //        await request.Content!.CopyToAsync(new MemoryStream());
-        //        return await tcs.Task;
-        //    });
-        //    var serviceConfig = CreateServiceConfig(retryableStatusCodes: new List<StatusCode> { StatusCode.DeadlineExceeded });
-        //    var invoker = HttpClientCallInvokerFactory.Create(httpClient, serviceConfig: serviceConfig);
-
-        //    // Act
-        //    var call = invoker.AsyncUnaryCall<HelloRequest, HelloReply>(ClientTestHelpers.ServiceMethod, string.Empty, new CallOptions(deadline: DateTime.UtcNow.AddMilliseconds(50)), new HelloRequest { Name = "World" });
-
-        //    // Assert
-        //    Assert.GreaterOrEqual(1, callCount);
-        //    var ex = await ExceptionAssert.ThrowsAsync<RpcException>(() => call.ResponseAsync).DefaultTimeout();
-        //    Assert.AreEqual(StatusCode.DeadlineExceeded, ex.StatusCode);
-        //    Assert.AreEqual(StatusCode.DeadlineExceeded, call.GetStatus().StatusCode);
-
-        //    tcs.SetException(new OperationCanceledException());
-        //}
     }
 }
