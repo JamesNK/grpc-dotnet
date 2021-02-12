@@ -43,6 +43,12 @@ namespace Grpc.AspNetCore.FunctionalTests.Client
                 return Task.FromException<DataMessage>(new RpcException(new Status(StatusCode.Unavailable, "")));
             }
 
+            // Ignore errors
+            SetExpectedErrorsFilter(writeContext =>
+            {
+                return true;
+            });
+
             // Arrange
             var method = Fixture.DynamicGrpc.AddUnaryMethod<DataMessage, DataMessage>(UnaryFailure);
 
