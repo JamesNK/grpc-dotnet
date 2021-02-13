@@ -284,12 +284,7 @@ namespace Grpc.Shared.TestAssets
 
             using (var call = client.StreamingInputCall())
             {
-                foreach (var item in bodySizes)
-                {
-                    await call.RequestStream.WriteAsync(item);
-                    await Task.Delay(100);
-                    await call.RequestStream.CompleteAsync();
-                }
+                await call.RequestStream.WriteAllAsync(bodySizes);
 
                 var response = await call.ResponseAsync;
                 Assert.AreEqual(74922, response.AggregatedPayloadSize);
