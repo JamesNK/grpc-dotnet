@@ -70,7 +70,9 @@ namespace Grpc.AspNetCore.FunctionalTests.Client
         [Test]
         public async Task Duplex_ManyParallelRequests_MessageRoundTripped()
         {
+            var attempts = 100;
             var allUploads = new List<string>();
+            var allCompletedTasks = new List<Task>();
             var tcs = new TaskCompletionSource<object?>(TaskCreationOptions.RunContinuationsAsynchronously);
 
             async Task MessageUpload(
@@ -85,28 +87,41 @@ namespace Grpc.AspNetCore.FunctionalTests.Client
                     chunks.Add(chunk.Value);
                 }
 
+                Task completeTask;
                 lock (allUploads)
                 {
                     allUploads.Add(string.Join(Environment.NewLine, chunks));
-                }
-
-                await tcs.Task;
-
-                // Write chunks
-                foreach (var chunk in chunks)
-                {
-                    await responseStream.WriteAsync(new StringValue
+                    if (allUploads.Count < attempts)
                     {
-                        Value = chunk
-                    });
-                }
-            }
+                        // Check that unused calls are canceled.
+                        completeTask = Task.Run(async () =>
+                        {
+                            await tcs.Task;
 
-            // Ignore errors
-            SetExpectedErrorsFilter(writeContext =>
-            {
-                return true;
-            });
+                            var cancellationTcs = new TaskCompletionSource<bool>();
+                            context.CancellationToken.Register(s => ((TaskCompletionSource<bool>)s!).SetResult(true), cancellationTcs);
+                            await cancellationTcs.Task;
+                        });
+                    }
+                    else
+                    {
+                        // Write response in used call.
+                        completeTask = Task.Run(async () =>
+                        {
+                            // Write chunks
+                            foreach (var chunk in chunks)
+                            {
+                                await responseStream.WriteAsync(new StringValue
+                                {
+                                    Value = chunk
+                                });
+                            }
+                        });
+                    }
+                }
+
+                await completeTask;
+            }
 
             var method = Fixture.DynamicGrpc.AddDuplexStreamingMethod<StringValue, StringValue>(MessageUpload);
 
@@ -140,9 +155,7 @@ namespace Grpc.AspNetCore.FunctionalTests.Client
                 Assert.AreEqual(ImportantMessage, upload);
             }
 
-            // Wait then clean up. Need to do this because async operations could still be generating errors.
-            await Task.Delay(100);
-            call.Dispose();
+            await Task.WhenAll(allCompletedTasks).DefaultTimeout();
         }
 
         private static readonly string ImportantMessage =
