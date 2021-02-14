@@ -923,5 +923,10 @@ namespace Grpc.Net.Client.Internal
                 singleMessage,
                 cancellationToken);
         }
+
+        public Task WriteClientStreamAsync<TState>(Func<GrpcCall<TRequest, TResponse>, Stream, CallOptions, TState, ValueTask> writeFunc, TState state)
+        {
+            return ClientStreamWriter!.WriteAsync(writeFunc, state);
+        }
     }
 }

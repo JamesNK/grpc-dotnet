@@ -40,9 +40,9 @@ namespace Grpc.Net.Client.Internal.Retry
         protected GrpcChannel Channel { get; }
         protected Method<TRequest, TResponse> Method { get; }
         protected CallOptions Options { get; }
-        protected TaskCompletionSource<GrpcCall<TRequest, TResponse>> FinalizedCallTcs { get; }
+        protected TaskCompletionSource<IGrpcCall<TRequest, TResponse>> FinalizedCallTcs { get; }
 
-        public Task<GrpcCall<TRequest, TResponse>> FinalizedCallTask => FinalizedCallTcs.Task;
+        public Task<IGrpcCall<TRequest, TResponse>> FinalizedCallTask => FinalizedCallTcs.Task;
         public IAsyncStreamReader<TResponse>? ClientStreamReader => _retryBaseClientStreamReader ??= new RetryCallBaseClientStreamReader<TRequest, TResponse>(this);
         public IClientStreamWriter<TRequest>? ClientStreamWriter => _retryBaseClientStreamWriter ??= new RetryCallBaseClientStreamWriter<TRequest, TResponse>(this);
         public WriteOptions? ClientStreamWriteOptions { get; internal set; }
@@ -58,7 +58,7 @@ namespace Grpc.Net.Client.Internal.Retry
             Channel = channel;
             Method = method;
             Options = options;
-            FinalizedCallTcs = new TaskCompletionSource<GrpcCall<TRequest, TResponse>>(TaskCreationOptions.RunContinuationsAsynchronously);
+            FinalizedCallTcs = new TaskCompletionSource<IGrpcCall<TRequest, TResponse>>(TaskCreationOptions.RunContinuationsAsynchronously);
             BufferedMessages = new List<ReadOnlyMemory<byte>>();
         }
 
@@ -266,6 +266,11 @@ namespace Grpc.Net.Client.Internal.Retry
         protected bool HasClientStream()
         {
             return Method.Type == MethodType.ClientStreaming || Method.Type == MethodType.DuplexStreaming;
+        }
+
+        Task IGrpcCall<TRequest, TResponse>.WriteClientStreamAsync<TState>(Func<GrpcCall<TRequest, TResponse>, Stream, CallOptions, TState, ValueTask> writeFunc, TState state)
+        {
+            throw new NotSupportedException();
         }
     }
 }

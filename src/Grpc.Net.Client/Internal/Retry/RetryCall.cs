@@ -18,10 +18,12 @@
 
 using System;
 using System.Diagnostics;
+using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using Grpc.Core;
 using Grpc.Net.Client.Configuration;
+using Grpc.Shared;
 
 namespace Grpc.Net.Client.Internal.Retry
 {
@@ -36,13 +38,13 @@ namespace Grpc.Net.Client.Internal.Retry
 
         private readonly Random _random;
 
-        private readonly CancellationTokenSource _retryCts = new CancellationTokenSource();
+        private readonly CancellationTokenSource _retryCts;
 
         private int _attemptCount;
         private int _nextRetryDelayMilliseconds;
 
         private GrpcCall<TRequest, TResponse>? _activeCall;
-        private TaskCompletionSource<GrpcCall<TRequest, TResponse>?> _newActiveCallTcs;
+        private TaskCompletionSource<IGrpcCall<TRequest, TResponse>?> _newActiveCallTcs;
 
         public RetryCall(RetryPolicy retryPolicy, GrpcChannel channel, Method<TRequest, TResponse> method, CallOptions options)
             : base(channel, method, options, LoggerName)
@@ -51,11 +53,21 @@ namespace Grpc.Net.Client.Internal.Retry
 
             _random = new Random();
 
-            _newActiveCallTcs = new TaskCompletionSource<GrpcCall<TRequest, TResponse>?>(TaskCreationOptions.RunContinuationsAsynchronously);
+            _newActiveCallTcs = new TaskCompletionSource<IGrpcCall<TRequest, TResponse>?>(TaskCreationOptions.RunContinuationsAsynchronously);
 
             ValidatePolicy(retryPolicy);
 
             _nextRetryDelayMilliseconds = Convert.ToInt32(retryPolicy.InitialBackoff.GetValueOrDefault().TotalMilliseconds);
+
+            _retryCts = new CancellationTokenSource();
+
+            // TODO(JamesNK) - Check that large deadlines are supported. Might need to use a Timer here instead.
+            var deadline = Options.Deadline.GetValueOrDefault(DateTime.MaxValue);
+            if (deadline != DateTime.MaxValue)
+            {
+                var timeout = CommonGrpcProtocolHelpers.GetTimerDueTime(deadline - Channel.Clock.UtcNow, Channel.MaxTimerDueTime);
+                _retryCts.CancelAfter(TimeSpan.FromMilliseconds(timeout));
+            }
         }
 
         private void ValidatePolicy(RetryPolicy retryPolicy)
@@ -150,7 +162,7 @@ namespace Grpc.Net.Client.Internal.Retry
                     _attemptCount++;
 
                     _newActiveCallTcs.TrySetResult(currentCall);
-                    _newActiveCallTcs = new TaskCompletionSource<GrpcCall<TRequest, TResponse>?>(TaskCreationOptions.RunContinuationsAsynchronously);
+                    _newActiveCallTcs = new TaskCompletionSource<IGrpcCall<TRequest, TResponse>?>(TaskCreationOptions.RunContinuationsAsynchronously);
                 }
 
                 Status? responseStatus;
@@ -235,33 +247,52 @@ namespace Grpc.Net.Client.Internal.Retry
                     }
                     else
                     {
+                        // Handle the situation where the call failed with a non-deadline status, but retry
+                        // didn't happen because of deadline exceeded.
+                        IGrpcCall<TRequest, TResponse> resolvedCall = (IsDeadlineExceeded() && !(currentCall.CallTask.IsCompletedSuccessfully && currentCall.CallTask.Result.StatusCode == StatusCode.DeadlineExceeded))
+                            ? DeadlineGrpcCall<TRequest, TResponse>.Instance
+                            : currentCall;
+
                         // Can't retry.
                         // Signal public API exceptions that they should finish throwing and then exit the retry loop.
-                        lock (Lock)
-                        {
-                            _newActiveCallTcs.TrySetResult(null);
-                            FinalizedCallTcs.TrySetResult(currentCall);
-                            _activeCall = null;
-                        }
+                        SetCommitedCall(resolvedCall);
                         return;
                     }
                 }
                 catch (Exception ex)
                 {
-                    // Cancellation token triggered by dispose could throw here. Only log unexpected errors.
-                    if (ex is not OperationCanceledException || !_retryCts.IsCancellationRequested)
+                    IGrpcCall<TRequest, TResponse> resolvedCall = currentCall;
+
+                    // Cancellation token triggered by dispose could throw here.
+                    if (ex is OperationCanceledException && _retryCts.IsCancellationRequested)
                     {
+                        // Cancellation could have been caused by an exceeded deadline.
+                        if (IsDeadlineExceeded())
+                        {
+                            // An exceeded deadline inbetween calls means there is no active call.
+                            // Create a fake call that returns exceeded deadline status to the app.
+                            resolvedCall = DeadlineGrpcCall<TRequest, TResponse>.Instance;
+                        }
+                    }
+                    else
+                    {
+                        // Only log unexpected errors.
                         Log.ErrorRetryingCall(Logger, ex);
                     }
 
-                    lock (Lock)
-                    {
-                        _newActiveCallTcs.TrySetResult(null);
-                        FinalizedCallTcs.TrySetResult(currentCall);
-                        _activeCall = null;
-                    }
+                    SetCommitedCall(resolvedCall);
                     return;
                 }
+            }
+        }
+
+        private void SetCommitedCall(IGrpcCall<TRequest, TResponse> currentCall)
+        {
+            lock (Lock)
+            {
+                _newActiveCallTcs.TrySetResult(null);
+                FinalizedCallTcs.TrySetResult(currentCall);
+                _activeCall = null;
             }
         }
 
@@ -299,7 +330,7 @@ namespace Grpc.Net.Client.Internal.Retry
                     call.ClientStreamWriter.WriteOptions = ClientStreamWriteOptions;
                 }
 
-                await call.ClientStreamWriter.WriteAsync(WriteNewMessage, message).ConfigureAwait(false);
+                await call.WriteClientStreamAsync(WriteNewMessage, message).ConfigureAwait(false);
                 BufferedCurrentMessage = false;
 
                 if (ClientStreamComplete)
@@ -309,18 +340,14 @@ namespace Grpc.Net.Client.Internal.Retry
             });
         }
 
-        private async Task DoClientStreamActionAsync(Func<GrpcCall<TRequest, TResponse>, Task> action)
+        private async Task DoClientStreamActionAsync(Func<IGrpcCall<TRequest, TResponse>, Task> action)
         {
             var call = await GetActiveCallAsync(previousCall: null).ConfigureAwait(false);
-            if (call == null)
-            {
-                call = await FinalizedCallTask.ConfigureAwait(false);
-            }
             while (true)
             {
                 try
                 {
-                    await action(call).ConfigureAwait(false);
+                    await action(call!).ConfigureAwait(false);
                     return;
                 }
                 catch
@@ -334,19 +361,34 @@ namespace Grpc.Net.Client.Internal.Retry
             }
         }
 
-        private Task<GrpcCall<TRequest, TResponse>?> GetActiveCallAsync(GrpcCall<TRequest, TResponse>? previousCall)
+        private async Task<IGrpcCall<TRequest, TResponse>?> GetActiveCallAsync(IGrpcCall<TRequest, TResponse>? previousCall)
         {
+            Task<IGrpcCall<TRequest, TResponse>?> newActiveCallTask;
             lock (Lock)
             {
                 // Return currently active call if there is one, and its not the previous call.
                 if (_activeCall != null && previousCall != _activeCall)
                 {
-                    return Task.FromResult<GrpcCall<TRequest, TResponse>?>(_activeCall);
+                    return _activeCall;
                 }
 
                 // Wait to see whether new call will be made
-                return _newActiveCallTcs.Task;
+                newActiveCallTask = _newActiveCallTcs.Task;
             }
+
+            var call = await newActiveCallTask.ConfigureAwait(false);
+            if (call == null)
+            {
+                call = await FinalizedCallTask.ConfigureAwait(false);
+            }
+
+            // Avoid infinite loop.
+            if (call == previousCall)
+            {
+                return null;
+            }
+
+            return call;
         }
     }
 }

@@ -17,12 +17,15 @@
 #endregion
 
 using System;
+using System.IO;
 using System.Threading.Tasks;
 using Grpc.Core;
 
 namespace Grpc.Net.Client.Internal
 {
     internal interface IGrpcCall<TRequest, TResponse> : IDisposable
+        where TRequest : class
+        where TResponse : class
     {
         Task<TResponse> GetResponseAsync();
         Task<Metadata> GetResponseHeadersAsync();
@@ -36,5 +39,7 @@ namespace Grpc.Net.Client.Internal
         void StartClientStreaming();
         void StartServerStreaming(TRequest request);
         void StartDuplexStreaming();
+
+        Task WriteClientStreamAsync<TState>(Func<GrpcCall<TRequest, TResponse>, Stream, CallOptions, TState, ValueTask> writeFunc, TState state);
     }
 }

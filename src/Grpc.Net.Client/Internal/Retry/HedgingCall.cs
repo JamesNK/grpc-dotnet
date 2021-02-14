@@ -40,13 +40,13 @@ namespace Grpc.Net.Client.Internal.Retry
 
         // Internal for testing
         internal Timer? _createCallTimer;
-        internal List<GrpcCall<TRequest, TResponse>> _activeCalls { get; }
+        internal List<IGrpcCall<TRequest, TResponse>> _activeCalls { get; }
 
         public HedgingCall(HedgingPolicy hedgingPolicy, GrpcChannel channel, Method<TRequest, TResponse> method, CallOptions options)
             : base(channel, method, options, LoggerName)
         {
             _hedgingPolicy = hedgingPolicy;
-            _activeCalls = new List<GrpcCall<TRequest, TResponse>>();
+            _activeCalls = new List<IGrpcCall<TRequest, TResponse>>();
 
             // Active call TCS is only used if there is a client stream, and a hedging delay.
             // It is awaited when attempting to write to the client stream and there are no active calls.
@@ -303,7 +303,7 @@ namespace Grpc.Net.Client.Internal.Retry
                 var writeTasks = new Task[calls.Count];
                 for (var i = 0; i < calls.Count; i++)
                 {
-                    writeTasks[i] = calls[i].ClientStreamWriter!.WriteAsync(WriteNewMessage, message);
+                    writeTasks[i] = calls[i].WriteClientStreamAsync(WriteNewMessage, message);
                 }
 
                 //Console.WriteLine($"Writing client stream message to {writeTasks.Length} calls.");
@@ -312,11 +312,11 @@ namespace Grpc.Net.Client.Internal.Retry
             BufferedCurrentMessage = false;
         }
 
-        private async Task WaitForCallAsync(Func<IList<GrpcCall<TRequest, TResponse>>, Task> action)
+        private async Task WaitForCallAsync(Func<IList<IGrpcCall<TRequest, TResponse>>, Task> action)
         {
             Console.WriteLine($"No activie calls. Wait for next call.");
 
-            GrpcCall<TRequest, TResponse>? call = null;
+            IGrpcCall<TRequest, TResponse>? call = null;
 
             // If there is a hedge delay then wait for next call.
             if (_newActiveCallTcs != null)
@@ -331,7 +331,7 @@ namespace Grpc.Net.Client.Internal.Retry
             await action(new[] { call }).ConfigureAwait(false);
         }
 
-        private Task DoClientStreamActionAsync(Func<IList<GrpcCall<TRequest, TResponse>>, Task> action)
+        private Task DoClientStreamActionAsync(Func<IList<IGrpcCall<TRequest, TResponse>>, Task> action)
         {
             lock (Lock)
             {

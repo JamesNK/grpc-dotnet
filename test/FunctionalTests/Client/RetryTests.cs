@@ -19,6 +19,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using Google.Protobuf;
 using Grpc.AspNetCore.FunctionalTests.Infrastructure;
@@ -39,7 +40,7 @@ namespace Grpc.AspNetCore.FunctionalTests.Client
         {
             int nextFailure = 1;
 
-            async Task<DataMessage> UnaryDeadlineExceeded(IAsyncStreamReader<DataMessage> requestStream, ServerCallContext context)
+            async Task<DataMessage> ClientStreamingWithReadFailures(IAsyncStreamReader<DataMessage> requestStream, ServerCallContext context)
             {
                 List<byte> bytes = new List<byte>();
                 await foreach (var message in requestStream.ReadAllAsync())
@@ -65,7 +66,7 @@ namespace Grpc.AspNetCore.FunctionalTests.Client
             });
 
             // Arrange
-            var method = Fixture.DynamicGrpc.AddClientStreamingMethod<DataMessage, DataMessage>(UnaryDeadlineExceeded);
+            var method = Fixture.DynamicGrpc.AddClientStreamingMethod<DataMessage, DataMessage>(ClientStreamingWithReadFailures);
 
             var channel = CreateChannel(serviceConfig: ServiceConfigHelpers.CreateRetryServiceConfig(maxAttempts: 10));
 
@@ -197,6 +198,78 @@ namespace Grpc.AspNetCore.FunctionalTests.Client
             AssertHasLog(LogLevel.Debug, "RetryEvaluated", $"Evaluated retry decision for failed gRPC call. Status code: 'DeadlineExceeded', Attempt: {exceptedServerCallCount}, Decision: DeadlineExceeded");
 
             tcs.SetResult(new DataMessage());
+        }
+
+        [Test]
+        public async Task Unary_DeadlineExceedDuringBackoff_Failure()
+        {
+            var callCount = 0;
+            Task<DataMessage> UnaryFailure(DataMessage request, ServerCallContext context)
+            {
+                callCount++;
+
+                return Task.FromException<DataMessage>(new RpcException(new Status(StatusCode.Unavailable, "")));
+            }
+
+            // Arrange
+            var method = Fixture.DynamicGrpc.AddUnaryMethod<DataMessage, DataMessage>(UnaryFailure);
+
+            var serviceConfig = ServiceConfigHelpers.CreateRetryServiceConfig(
+                initialBackoff: TimeSpan.FromSeconds(10),
+                maxBackoff: TimeSpan.FromSeconds(10),
+                retryableStatusCodes: new List<StatusCode> { StatusCode.Unavailable });
+            var channel = CreateChannel(serviceConfig: serviceConfig);
+
+            var client = TestClientFactory.Create(channel, method);
+
+            // Act
+            var call = client.UnaryCall(new DataMessage(), new CallOptions(deadline: DateTime.UtcNow.AddMilliseconds(500)));
+
+            // Assert
+            var ex = await ExceptionAssert.ThrowsAsync<RpcException>(() => call.ResponseAsync).DefaultTimeout();
+            Assert.AreEqual(StatusCode.DeadlineExceeded, ex.StatusCode);
+            Assert.AreEqual(StatusCode.DeadlineExceeded, call.GetStatus().StatusCode);
+            Assert.AreEqual(1, callCount);
+
+            Assert.IsFalse(Logs.Any(l => l.EventId.Name == "DeadlineTimerRescheduled"));
+        }
+
+        [Test]
+        public async Task Duplex_DeadlineExceedDuringBackoff_Failure()
+        {
+            var callCount = 0;
+            Task DuplexDeadlineExceeded(IAsyncStreamReader<DataMessage> requestStream, IServerStreamWriter<DataMessage> responseStream, ServerCallContext context)
+            {
+                callCount++;
+
+                return Task.FromException(new RpcException(new Status(StatusCode.Unavailable, "")));
+            }
+
+            // Arrange
+            var method = Fixture.DynamicGrpc.AddDuplexStreamingMethod<DataMessage, DataMessage>(DuplexDeadlineExceeded);
+
+            var serviceConfig = ServiceConfigHelpers.CreateRetryServiceConfig(
+                initialBackoff: TimeSpan.FromSeconds(10),
+                maxBackoff: TimeSpan.FromSeconds(10),
+                retryableStatusCodes: new List<StatusCode> { StatusCode.Unavailable });
+            var channel = CreateChannel(serviceConfig: serviceConfig);
+
+            var client = TestClientFactory.Create(channel, method);
+
+            // Act
+            var call = client.DuplexStreamingCall(new CallOptions(deadline: DateTime.UtcNow.AddMilliseconds(300)));
+
+            // Assert
+            var ex = await ExceptionAssert.ThrowsAsync<RpcException>(() => call.ResponseStream.MoveNext(CancellationToken.None)).DefaultTimeout();
+            Assert.AreEqual(StatusCode.DeadlineExceeded, ex.StatusCode); 
+
+            ex = await ExceptionAssert.ThrowsAsync<RpcException>(() => call.RequestStream.WriteAsync(new DataMessage())).DefaultTimeout();
+            Assert.AreEqual(StatusCode.DeadlineExceeded, ex.StatusCode);
+
+            Assert.AreEqual(StatusCode.DeadlineExceeded, call.GetStatus().StatusCode);
+            Assert.AreEqual(1, callCount);
+
+            Assert.IsFalse(Logs.Any(l => l.EventId.Name == "DeadlineTimerRescheduled"));
         }
 
         [Test]
