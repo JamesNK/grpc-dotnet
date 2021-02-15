@@ -67,7 +67,7 @@ namespace Grpc.AspNetCore.FunctionalTests.Client
             Assert.AreEqual(StatusCode.Unavailable, ex.StatusCode);
             Assert.AreEqual(StatusCode.Unavailable, call.GetStatus().StatusCode);
 
-            AssertHasLog(LogLevel.Debug, "CallCommited", "Call commited. Reason: MaxAttempts");
+            AssertHasLog(LogLevel.Debug, "CallCommited", "Call commited. Reason: ExceededAttemptCount");
         }
 
         [Test]
@@ -95,7 +95,7 @@ namespace Grpc.AspNetCore.FunctionalTests.Client
                              
                              ";
 
-        var attempts = 100;
+            var attempts = 100;
             var allUploads = new List<string>();
             var allCompletedTasks = new List<Task>();
             var tcs = new TaskCompletionSource<object?>(TaskCreationOptions.RunContinuationsAsynchronously);

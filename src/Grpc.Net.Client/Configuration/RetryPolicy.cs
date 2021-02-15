@@ -46,7 +46,7 @@ namespace Grpc.Net.Client.Configuration
         /// <summary>
         /// Gets or sets the maximum number of call attempts. This value includes the original attempt.
         /// This property is required and must be greater than 1.
-        /// Any value greater than 5 will be treated as if it were 5.
+        /// This value is limited by <see cref="GrpcChannelOptions.MaxRetryAttempts"/>.
         /// </summary>
         public int? MaxAttempts
         {

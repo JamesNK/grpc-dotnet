@@ -47,7 +47,7 @@ namespace Grpc.Net.Client.Internal.Retry
         internal Task? CreateHedgingCallsTask { get; set; }
 
         public HedgingCall(HedgingPolicy hedgingPolicy, GrpcChannel channel, Method<TRequest, TResponse> method, CallOptions options)
-            : base(channel, method, options, LoggerName)
+            : base(channel, method, options, LoggerName, hedgingPolicy.MaxAttempts.GetValueOrDefault())
         {
             _hedgingPolicy = hedgingPolicy;
             _activeCalls = new List<IGrpcCall<TRequest, TResponse>>();
@@ -163,7 +163,7 @@ namespace Grpc.Net.Client.Internal.Retry
                 }
                 else
                 {
-                    CommitCall(call, CommitReason.FatelStatusCode);
+                    CommitCall(call, CommitReason.FatalStatusCode);
                 }
             }
 
@@ -174,10 +174,10 @@ namespace Grpc.Net.Client.Internal.Retry
                     // Deadline has been exceeded so immediately commit call.
                     CommitCall(call, CommitReason.DeadlineExceeded);
                 }
-                else if (_activeCalls.Count == 1 && _callsAttempted >= _hedgingPolicy.MaxAttempts.GetValueOrDefault())
+                else if (_activeCalls.Count == 1 && _callsAttempted >= MaxRetryAttempts)
                 {
                     // This is the last active call and no more will be made.
-                    CommitCall(call, CommitReason.MaxAttempts);
+                    CommitCall(call, CommitReason.ExceededAttemptCount);
                 }
                 else if (_activeCalls.Count == 1 && (Channel.RetryThrottling?.IsRetryThrottlingActive() ?? false))
                 {
@@ -197,23 +197,11 @@ namespace Grpc.Net.Client.Internal.Retry
             }
         }
 
-        private void CommitCall(IGrpcCall<TRequest, TResponse> call, CommitReason commitReason)
+        protected override void OnCommitCall(IGrpcCall<TRequest, TResponse> call)
         {
-            lock (Lock)
-            {
-                if (!FinalizedCallTask.IsCompletedSuccessfully)
-                {
-                    _activeCalls.Remove(call);
+            _activeCalls.Remove(call);
 
-                    CleanUpUnsynchronized();
-
-                    // Log before committing for unit tests.
-                    Log.CallCommited(Logger, commitReason);
-
-                    NewActiveCallTcs?.SetResult(null);
-                    FinalizedCallTcs.SetResult(call);
-                }
-            }
+            CleanUpUnsynchronized();
         }
 
         private void CleanUpUnsynchronized()
@@ -233,7 +221,7 @@ namespace Grpc.Net.Client.Internal.Retry
             if (hedgingDelay == TimeSpan.Zero)
             {
                 // If there is no delay then start all call immediately
-                while (_callsAttempted < _hedgingPolicy.MaxAttempts.GetValueOrDefault())
+                while (_callsAttempted < MaxRetryAttempts)
                 {
                     _ = StartCall(startCallFunc);
 
@@ -259,7 +247,7 @@ namespace Grpc.Net.Client.Internal.Retry
 
             try
             {
-                while (_callsAttempted < _hedgingPolicy.MaxAttempts.GetValueOrDefault())
+                while (_callsAttempted < MaxRetryAttempts)
                 {
                     _ = StartCall(startCallFunc);
 

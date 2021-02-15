@@ -44,7 +44,7 @@ namespace Grpc.Net.Client.Internal.Retry
         private GrpcCall<TRequest, TResponse>? _activeCall;
 
         public RetryCall(RetryPolicy retryPolicy, GrpcChannel channel, Method<TRequest, TResponse> method, CallOptions options)
-            : base(channel, method, options, LoggerName)
+            : base(channel, method, options, LoggerName, retryPolicy.MaxAttempts.GetValueOrDefault())
         {
             _retryPolicy = retryPolicy;
 
@@ -92,41 +92,41 @@ namespace Grpc.Net.Client.Internal.Retry
             return Convert.ToInt32(nextMilliseconds);
         }
 
-        private RetryResult EvaluateRetry(Status status, int? retryPushbackMilliseconds)
+        private CommitReason? EvaluateRetry(Status status, int? retryPushbackMilliseconds)
         {
             if (IsDeadlineExceeded())
             {
-                return RetryResult.DeadlineExceeded;
+                return CommitReason.DeadlineExceeded;
             }
 
             if (Channel.RetryThrottling?.IsRetryThrottlingActive() ?? false)
             {
-                return RetryResult.Throttled;
+                return CommitReason.Throttled;
             }
 
-            if (_attemptCount >= _retryPolicy.MaxAttempts.GetValueOrDefault())
+            if (_attemptCount >= MaxRetryAttempts)
             {
-                return RetryResult.ExceededAttemptCount;
+                return CommitReason.ExceededAttemptCount;
             }
 
             if (retryPushbackMilliseconds != null)
             {
                 if (retryPushbackMilliseconds >= 0)
                 {
-                    return RetryResult.Retry;
+                    return null;
                 }
                 else
                 {
-                    return RetryResult.PushbackStop;
+                    return CommitReason.PushbackStop;
                 }
             }
 
             if (!_retryPolicy.RetryableStatusCodes.Contains(status.StatusCode))
             {
-                return RetryResult.NotRetryableStatusCode;
+                return CommitReason.FatalStatusCode;
             }
 
-            return RetryResult.Retry;
+            return null;
         }
 
         private async Task StartRetry(Action<GrpcCall<TRequest, TResponse>> startCallFunc)
@@ -172,7 +172,7 @@ namespace Grpc.Net.Client.Internal.Retry
                 if (responseStatus == null)
                 {
                     // Headers were returned. We're commited.
-                    SetCommitedCall(currentCall);
+                    CommitCall(currentCall, CommitReason.ResponseHeadersReceived);
 
                     responseStatus = await currentCall.CallTask.ConfigureAwait(false);
                     if (responseStatus.GetValueOrDefault().StatusCode == StatusCode.OK)
@@ -198,9 +198,9 @@ namespace Grpc.Net.Client.Internal.Retry
                     }
 
                     var result = EvaluateRetry(status, retryPushbackMS);
-                    Log.RetryEvaluated(Logger, status.StatusCode, _attemptCount, result);
+                    Log.RetryEvaluated(Logger, status.StatusCode, _attemptCount, result == null);
 
-                    if (result == RetryResult.Retry)
+                    if (result == null)
                     {
                         TimeSpan delayDuration;
                         if (retryPushbackMS != null)
@@ -234,13 +234,14 @@ namespace Grpc.Net.Client.Internal.Retry
 
                         // Can't retry.
                         // Signal public API exceptions that they should finish throwing and then exit the retry loop.
-                        SetCommitedCall(resolvedCall);
+                        CommitCall(resolvedCall, result.GetValueOrDefault());
                         return;
                     }
                 }
                 catch (Exception ex)
                 {
                     IGrpcCall<TRequest, TResponse> resolvedCall = currentCall;
+                    CommitReason commitReason;
 
                     // Cancellation token triggered by dispose could throw here.
                     if (ex is OperationCanceledException && CancellationTokenSource.IsCancellationRequested)
@@ -248,31 +249,33 @@ namespace Grpc.Net.Client.Internal.Retry
                         // Cancellation could have been caused by an exceeded deadline.
                         if (IsDeadlineExceeded())
                         {
+                            commitReason = CommitReason.DeadlineExceeded;
                             // An exceeded deadline inbetween calls means there is no active call.
                             // Create a fake call that returns exceeded deadline status to the app.
                             resolvedCall = DeadlineCall;
                         }
+                        else
+                        {
+                            commitReason = CommitReason.Canceled;
+                        }
                     }
                     else
                     {
+                        commitReason = CommitReason.UnexpectedError;
+
                         // Only log unexpected errors.
                         Log.ErrorRetryingCall(Logger, ex);
                     }
 
-                    SetCommitedCall(resolvedCall);
+                    CommitCall(resolvedCall, commitReason);
                     return;
                 }
             }
         }
 
-        private void SetCommitedCall(IGrpcCall<TRequest, TResponse> currentCall)
+        protected override void OnCommitCall(IGrpcCall<TRequest, TResponse> call)
         {
-            lock (Lock)
-            {
-                NewActiveCallTcs?.TrySetResult(null);
-                FinalizedCallTcs.TrySetResult(currentCall);
-                _activeCall = null;
-            }
+            _activeCall = null;
         }
 
         protected override void Dispose(bool disposing)

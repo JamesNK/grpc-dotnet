@@ -66,6 +66,35 @@ namespace Grpc.Net.Client
         public int? MaxReceiveMessageSize { get; set; }
 
         /// <summary>
+        /// Gets or sets the maximum retry attempts. This value limits any retry and hedging attempt values specified in
+        /// the service config.
+        /// <para>
+        /// A <c>null</c> value removes the maximum retry attempts limit. Defaults to 5.
+        /// </para>
+        /// </summary>
+        public int? MaxRetryAttempts { get; set; }
+
+        /// <summary>
+        /// Gets or sets the maximum buffer size in bytes that can be used to store sent messages when retrying
+        /// or hedging calls. If the buffer limit is exceeded then no more retry attempts are made and all
+        /// hedging calls but one will be canceled. This limit is applied across all calls made using the channel.
+        /// <para>
+        /// A <c>null</c> value removes the maximum retry buffer size limit. Defaults to 16,777,216 (16 MB).
+        /// </para>
+        /// </summary>
+        public int? MaxRetryBufferSize { get; set; }
+
+        /// <summary>
+        /// Gets or sets the maximum buffer size in bytes that can be used to store sent messages when retrying
+        /// or hedging calls. If the buffer limit is exceeded then no more retry attempts are made and all
+        /// hedging calls but one will be canceled. This limit is applied to one call.
+        /// <para>
+        /// A <c>null</c> value removes the maximum retry buffer size limit per call. Defaults to 1,048,576 (1 MB).
+        /// </para>
+        /// </summary>
+        public int? MaxRetryBufferPerCallSize { get; set; }
+
+        /// <summary>
         /// Gets or sets a collection of compression providers.
         /// </summary>
         public IList<ICompressionProvider>? CompressionProviders { get; set; }
@@ -138,6 +167,9 @@ namespace Grpc.Net.Client
         public GrpcChannelOptions()
         {
             MaxReceiveMessageSize = GrpcChannel.DefaultMaxReceiveMessageSize;
+            MaxRetryAttempts = GrpcChannel.DefaultMaxRetryAttempts;
+            MaxRetryBufferSize = GrpcChannel.DefaultMaxRetryBufferSize;
+            MaxRetryBufferPerCallSize = GrpcChannel.DefaultMaxRetryBufferPerCallSize;
         }
     }
 }

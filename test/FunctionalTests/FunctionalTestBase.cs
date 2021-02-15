@@ -42,12 +42,13 @@ namespace Grpc.AspNetCore.FunctionalTests
 
         protected GrpcChannel Channel => _channel ??= CreateChannel();
 
-        protected GrpcChannel CreateChannel(bool useHandler = false, ServiceConfig? serviceConfig = null)
+        protected GrpcChannel CreateChannel(bool useHandler = false, ServiceConfig? serviceConfig = null, int? maxRetryAttempts = null)
         {
             var options = new GrpcChannelOptions
             {
                 LoggerFactory = LoggerFactory,
-                ServiceConfig = serviceConfig
+                ServiceConfig = serviceConfig,
+                MaxRetryAttempts = maxRetryAttempts
             };
             if (useHandler)
             {

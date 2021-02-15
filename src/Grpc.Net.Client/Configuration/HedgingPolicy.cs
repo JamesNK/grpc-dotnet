@@ -49,7 +49,7 @@ namespace Grpc.Net.Client.Configuration
         /// the original attempt.
         ///
         /// This field is required and must be greater than 1.
-        /// Any value greater than 5 will be treated as if it were 5.
+        /// This value is limited by <see cref="GrpcChannelOptions.MaxRetryAttempts"/>.
         /// </summary>
         public int? MaxAttempts
         {

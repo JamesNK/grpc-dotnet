@@ -28,8 +28,8 @@ namespace Grpc.Net.Client.Internal.Retry
     {
         protected static class Log
         {
-            private static readonly Action<ILogger, StatusCode, int, RetryResult, Exception?> _retryEvaluated =
-                LoggerMessage.Define<StatusCode, int, RetryResult>(LogLevel.Debug, new EventId(1, "RetryEvaluated"), "Evaluated retry decision for failed gRPC call. Status code: '{StatusCode}', Attempt: {AttemptCount}, Decision: {RetryResult}");
+            private static readonly Action<ILogger, StatusCode, int, bool, Exception?> _retryEvaluated =
+                LoggerMessage.Define<StatusCode, int, bool>(LogLevel.Debug, new EventId(1, "RetryEvaluated"), "Evaluated retry for failed gRPC call. Status code: '{StatusCode}', Attempt: {AttemptCount}, Retry: {WillRetry}");
 
             private static readonly Action<ILogger, string, Exception?> _retryPushbackReceived =
                 LoggerMessage.Define<string>(LogLevel.Debug, new EventId(2, "RetryPushbackReceived"), "Retry pushback of '{RetryPushback}' received from the failed gRPC call.");
@@ -50,14 +50,14 @@ namespace Grpc.Net.Client.Internal.Retry
                 LoggerMessage.Define<CommitReason>(LogLevel.Debug, new EventId(7, "CallCommited"), "Call commited. Reason: {CommitReason}");
 
             private static readonly Action<ILogger, TimeSpan, Exception?> _startingHedgingCallTimer =
-                LoggerMessage.Define<TimeSpan>(LogLevel.Trace, new EventId(8, "StartingHedgingCallTimer"), "Starting hedging call timer with delay {HedingDelay}.");
+                LoggerMessage.Define<TimeSpan>(LogLevel.Trace, new EventId(8, "StartingHedgingCallTimer"), "Starting hedging call timer with delay {HedgingDelay}.");
 
             private static readonly Action<ILogger, Exception?> _stoppingHedgingCallTimer =
                 LoggerMessage.Define(LogLevel.Trace, new EventId(9, "StoppingHedgingCallTimer"), "Stopping hedging call timer.");
 
-            internal static void RetryEvaluated(ILogger logger, StatusCode statusCode, int attemptCount, RetryResult result)
+            internal static void RetryEvaluated(ILogger logger, StatusCode statusCode, int attemptCount, bool willRetry)
             {
-                _retryEvaluated(logger, statusCode, attemptCount, result, null);
+                _retryEvaluated(logger, statusCode, attemptCount, willRetry, null);
             }
 
             internal static void RetryPushbackReceived(ILogger logger, string retryPushback)

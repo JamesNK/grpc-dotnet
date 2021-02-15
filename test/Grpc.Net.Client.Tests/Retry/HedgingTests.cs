@@ -55,7 +55,10 @@ namespace Grpc.Net.Client.Tests.Retry
                 return ResponseUtils.CreateResponse(HttpStatusCode.OK, streamContent);
             });
             var serviceConfig = ServiceConfigHelpers.CreateHedgingServiceConfig(maxAttempts: maxAttempts);
-            var invoker = HttpClientCallInvokerFactory.Create(httpClient, serviceConfig: serviceConfig);
+            var invoker = HttpClientCallInvokerFactory.Create(
+                httpClient,
+                serviceConfig: serviceConfig,
+                configure: o => o.MaxRetryAttempts = maxAttempts);
 
             // Act
             var call = invoker.AsyncUnaryCall<HelloRequest, HelloReply>(ClientTestHelpers.ServiceMethod, string.Empty, new CallOptions(), new HelloRequest { Name = "World" });
@@ -92,7 +95,10 @@ namespace Grpc.Net.Client.Tests.Retry
                 return ResponseUtils.CreateResponse(HttpStatusCode.OK, streamContent);
             });
             var serviceConfig = ServiceConfigHelpers.CreateHedgingServiceConfig(maxAttempts: attempts);
-            var invoker = HttpClientCallInvokerFactory.Create(httpClient, serviceConfig: serviceConfig);
+            var invoker = HttpClientCallInvokerFactory.Create(
+                httpClient,
+                serviceConfig: serviceConfig,
+                configure: o => o.MaxRetryAttempts = attempts);
 
             // Act
             var call = invoker.AsyncClientStreamingCall<HelloRequest, HelloReply>(ClientTestHelpers.ServiceMethod, string.Empty, new CallOptions());
@@ -262,12 +268,10 @@ namespace Grpc.Net.Client.Tests.Retry
         }
 
         [Test]
-        [Ignore("sdfsdf")]
         public async Task AsyncUnaryCall_ExceedDeadlineWithActiveCalls_Failure()
         {
             // Arrange
             var tcs = new TaskCompletionSource<HttpResponseMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
-            var requestMessages = new List<HelloRequest>();
 
             var callCount = 0;
             var httpClient = ClientTestHelpers.CreateTestClient(request =>
@@ -282,16 +286,10 @@ namespace Grpc.Net.Client.Tests.Retry
             var call = invoker.AsyncUnaryCall<HelloRequest, HelloReply>(ClientTestHelpers.ServiceMethod, string.Empty, new CallOptions(deadline: DateTime.UtcNow.AddMilliseconds(100)), new HelloRequest { Name = "World" });
 
             // Assert
-            Assert.AreEqual(5, callCount);
+            Assert.AreEqual(1, callCount);
             var ex = await ExceptionAssert.ThrowsAsync<RpcException>(() => call.ResponseAsync).DefaultTimeout();
-            Assert.AreEqual(StatusCode.Unavailable, ex.StatusCode);
-            Assert.AreEqual(StatusCode.Unavailable, call.GetStatus().StatusCode);
-
-            Assert.AreEqual(5, requestMessages.Count);
-            foreach (var requestMessage in requestMessages)
-            {
-                Assert.AreEqual("World", requestMessage.Name);
-            }
+            Assert.AreEqual(StatusCode.DeadlineExceeded, ex.StatusCode);
+            Assert.AreEqual(StatusCode.DeadlineExceeded, call.GetStatus().StatusCode);
         }
 
         [Test]

@@ -30,6 +30,8 @@ using Grpc.Shared;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Grpc.Net.Client.Internal.Retry;
+using System.Threading;
+using System.Diagnostics;
 
 namespace Grpc.Net.Client
 {
@@ -41,10 +43,14 @@ namespace Grpc.Net.Client
     public sealed class GrpcChannel : ChannelBase, IDisposable
     {
         internal const int DefaultMaxReceiveMessageSize = 1024 * 1024 * 4; // 4 MB
+        internal const int DefaultMaxRetryAttempts = 5;
+        internal const int DefaultMaxRetryBufferSize = 1024 * 1024 * 16; // 16 MB
+        internal const int DefaultMaxRetryBufferPerCallSize = 1024 * 1024; // 1 MB
 
         private readonly ConcurrentDictionary<IMethod, GrpcMethodInfo> _methodInfoCache;
         private readonly Func<IMethod, GrpcMethodInfo> _createMethodInfoFunc;
         private readonly Dictionary<MethodKey, MethodConfig>? _serviceConfigMethods;
+        private readonly object? _retryBufferLock;
         // Internal for testing
         internal readonly HashSet<IDisposable> ActiveCalls;
 
@@ -52,6 +58,9 @@ namespace Grpc.Net.Client
         internal HttpMessageInvoker HttpInvoker { get; }
         internal int? SendMaxMessageSize { get; }
         internal int? ReceiveMaxMessageSize { get; }
+        internal int? MaxRetryAttempts { get; }
+        internal int? MaxRetryBufferSize { get; }
+        internal int? MaxRetryBufferPerCallSize { get; }
         internal ILoggerFactory LoggerFactory { get; }
         internal bool ThrowOperationCanceledOnCancellation { get; }
         internal bool? IsSecure { get; }
@@ -60,7 +69,10 @@ namespace Grpc.Net.Client
         internal string MessageAcceptEncoding { get; }
         internal bool Disposed { get; private set; }
         internal GrpcServiceConfig? ServiceConfig { get; }
+
+        // Stateful
         internal ChannelRetryThrottling? RetryThrottling { get; }
+        internal int CurrentRetryBufferSize;
 
         // Options that are set in unit tests
         internal ISystemClock Clock = SystemClock.Instance;
@@ -84,6 +96,9 @@ namespace Grpc.Net.Client
             HttpInvoker = channelOptions.HttpClient ?? CreateInternalHttpInvoker(channelOptions.HttpHandler);
             SendMaxMessageSize = channelOptions.MaxSendMessageSize;
             ReceiveMaxMessageSize = channelOptions.MaxReceiveMessageSize;
+            MaxRetryAttempts = channelOptions.MaxRetryAttempts;
+            MaxRetryBufferSize = channelOptions.MaxRetryBufferSize;
+            MaxRetryBufferPerCallSize = channelOptions.MaxRetryBufferPerCallSize;
             CompressionProviders = ResolveCompressionProviders(channelOptions.CompressionProviders);
             MessageAcceptEncoding = GrpcProtocolHelpers.GetMessageAcceptEncoding(CompressionProviders);
             LoggerFactory = channelOptions.LoggerFactory ?? NullLoggerFactory.Instance;
@@ -94,6 +109,7 @@ namespace Grpc.Net.Client
             ServiceConfig = channelOptions.ServiceConfig != null ? new GrpcServiceConfig(channelOptions.ServiceConfig) : null;
             RetryThrottling = ServiceConfig?.RetryThrottling != null ? new ChannelRetryThrottling(ServiceConfig.RetryThrottling) : null;
             _serviceConfigMethods = (ServiceConfig != null) ? CreateServiceConfigMethods(ServiceConfig) : null;
+            _retryBufferLock = (ServiceConfig != null) ? new object() : null;
 
             if (channelOptions.Credentials != null)
             {
@@ -340,6 +356,32 @@ namespace Grpc.Net.Client
                 HttpInvoker.Dispose();
             }
             Disposed = true;
+        }
+
+        internal bool TryAddToRetryBuffer(int messageSize)
+        {
+            Debug.Assert(_retryBufferLock != null);
+
+            lock (_retryBufferLock)
+            {
+                if (CurrentRetryBufferSize + messageSize > MaxRetryBufferSize)
+                {
+                    return false;
+                }
+
+                CurrentRetryBufferSize += messageSize;
+                return true;
+            }
+        }
+
+        internal void RemoveFromRetryBuffer(int messageSize)
+        {
+            Debug.Assert(_retryBufferLock != null);
+
+            lock (_retryBufferLock)
+            {
+                CurrentRetryBufferSize -= messageSize;
+            }
         }
 
         private struct MethodKey : IEquatable<MethodKey>

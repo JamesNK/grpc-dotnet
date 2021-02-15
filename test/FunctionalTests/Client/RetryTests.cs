@@ -67,16 +67,17 @@ namespace Grpc.AspNetCore.FunctionalTests.Client
 
             // Arrange
             var method = Fixture.DynamicGrpc.AddClientStreamingMethod<DataMessage, DataMessage>(ClientStreamingWithReadFailures);
-
             var channel = CreateChannel(serviceConfig: ServiceConfigHelpers.CreateRetryServiceConfig(maxAttempts: 10));
-
             var client = TestClientFactory.Create(channel, method);
+            var sentData = new List<byte>();
 
             // Act
             var call = client.ClientStreamingCall();
 
             for (var i = 0; i < 20; i++)
             {
+                sentData.Add((byte)i);
+
                 await call.RequestStream.WriteAsync(new DataMessage { Data = ByteString.CopyFrom(new byte[] { (byte)i }) }).DefaultTimeout();
                 await Task.Delay(1);
             }
@@ -86,12 +87,7 @@ namespace Grpc.AspNetCore.FunctionalTests.Client
             var result = await call.ResponseAsync.DefaultTimeout();
 
             // Assert
-            foreach (var item in result.Data)
-            {
-                Console.WriteLine(item);
-            }
-
-            Assert.AreEqual(20, result.Data.Length);
+            Assert.IsTrue(result.Data.Span.SequenceEqual(sentData.ToArray()));
         }
 
         [Test]
@@ -121,9 +117,10 @@ namespace Grpc.AspNetCore.FunctionalTests.Client
             Assert.AreEqual(StatusCode.Unavailable, call.GetStatus().StatusCode);
 
             AssertHasLog(LogLevel.Debug, "RetryPushbackReceived", "Retry pushback of '5' received from the failed gRPC call.");
-            AssertHasLog(LogLevel.Debug, "RetryEvaluated", "Evaluated retry decision for failed gRPC call. Status code: 'Unavailable', Attempt: 1, Decision: Retry");
+            AssertHasLog(LogLevel.Debug, "RetryEvaluated", "Evaluated retry for failed gRPC call. Status code: 'Unavailable', Attempt: 1, Retry: True");
             AssertHasLog(LogLevel.Trace, "StartingRetryDelay", "Starting retry delay of 00:00:00.0050000.");
-            AssertHasLog(LogLevel.Debug, "RetryEvaluated", "Evaluated retry decision for failed gRPC call. Status code: 'Unavailable', Attempt: 5, Decision: ExceededAttemptCount");
+            AssertHasLog(LogLevel.Debug, "RetryEvaluated", "Evaluated retry for failed gRPC call. Status code: 'Unavailable', Attempt: 5, Retry: False");
+            AssertHasLog(LogLevel.Debug, "CallCommited", "Call commited. Reason: ExceededAttemptCount");
         }
 
         [Test]
@@ -139,11 +136,12 @@ namespace Grpc.AspNetCore.FunctionalTests.Client
             // Arrange
             var method = Fixture.DynamicGrpc.AddUnaryMethod<DataMessage, DataMessage>(UnaryFailure);
 
-            var channel = CreateChannel(serviceConfig: ServiceConfigHelpers.CreateRetryServiceConfig(retryThrottling: new RetryThrottlingPolicy
-            {
-                MaxTokens = 5,
-                TokenRatio = 0.1
-            }));
+            var channel = CreateChannel(serviceConfig: ServiceConfigHelpers.CreateRetryServiceConfig(
+                retryThrottling: new RetryThrottlingPolicy
+                {
+                    MaxTokens = 5,
+                    TokenRatio = 0.1
+                }));
 
             var client = TestClientFactory.Create(channel, method);
 
@@ -155,7 +153,8 @@ namespace Grpc.AspNetCore.FunctionalTests.Client
             Assert.AreEqual(StatusCode.Unavailable, ex.StatusCode);
             Assert.AreEqual(StatusCode.Unavailable, call.GetStatus().StatusCode);
 
-            AssertHasLog(LogLevel.Debug, "RetryEvaluated", "Evaluated retry decision for failed gRPC call. Status code: 'Unavailable', Attempt: 3, Decision: Throttled");
+            AssertHasLog(LogLevel.Debug, "RetryEvaluated", "Evaluated retry for failed gRPC call. Status code: 'Unavailable', Attempt: 3, Retry: False");
+            AssertHasLog(LogLevel.Debug, "CallCommited", "Call commited. Reason: Throttled");
         }
 
         [TestCase(1)]
@@ -195,7 +194,8 @@ namespace Grpc.AspNetCore.FunctionalTests.Client
 
             Assert.IsFalse(Logs.Any(l => l.EventId.Name == "DeadlineTimerRescheduled"));
 
-            AssertHasLog(LogLevel.Debug, "RetryEvaluated", $"Evaluated retry decision for failed gRPC call. Status code: 'DeadlineExceeded', Attempt: {exceptedServerCallCount}, Decision: DeadlineExceeded");
+            AssertHasLog(LogLevel.Debug, "RetryEvaluated", $"Evaluated retry for failed gRPC call. Status code: 'DeadlineExceeded', Attempt: {exceptedServerCallCount}, Retry: False");
+            AssertHasLog(LogLevel.Debug, "CallCommited", "Call commited. Reason: DeadlineExceeded");
 
             tcs.SetResult(new DataMessage());
         }
@@ -306,7 +306,8 @@ namespace Grpc.AspNetCore.FunctionalTests.Client
             Assert.AreEqual(StatusCode.DeadlineExceeded, call.GetStatus().StatusCode);
             Assert.AreEqual(0, callCount);
 
-            AssertHasLog(LogLevel.Debug, "RetryEvaluated", "Evaluated retry decision for failed gRPC call. Status code: 'DeadlineExceeded', Attempt: 1, Decision: DeadlineExceeded");
+            AssertHasLog(LogLevel.Debug, "RetryEvaluated", "Evaluated retry for failed gRPC call. Status code: 'DeadlineExceeded', Attempt: 1, Retry: False");
+            AssertHasLog(LogLevel.Debug, "CallCommited", "Call commited. Reason: DeadlineExceeded");
 
             tcs.SetResult(new DataMessage());
         }

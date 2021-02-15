@@ -22,9 +22,13 @@ namespace Grpc.Net.Client.Internal.Retry
     internal enum CommitReason
     {
         ResponseHeadersReceived,
-        FatelStatusCode,
-        MaxAttempts,
+        FatalStatusCode,
+        ExceededAttemptCount,
         DeadlineExceeded,
-        Throttled
+        Throttled,
+        BufferExceeded,
+        PushbackStop,
+        UnexpectedError,
+        Canceled
     }
 }

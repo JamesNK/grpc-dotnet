@@ -47,6 +47,7 @@ namespace Grpc.Net.Client.Internal.Retry
         protected GrpcChannel Channel { get; }
         protected Method<TRequest, TResponse> Method { get; }
         protected CallOptions Options { get; }
+        protected int MaxRetryAttempts { get; }
         protected TaskCompletionSource<IGrpcCall<TRequest, TResponse>> FinalizedCallTcs { get; }
         protected CancellationTokenSource CancellationTokenSource { get; }
         protected TaskCompletionSource<IGrpcCall<TRequest, TResponse>?>? NewActiveCallTcs { get; set; }
@@ -59,9 +60,10 @@ namespace Grpc.Net.Client.Internal.Retry
         protected bool ClientStreamComplete { get; set; }
 
         protected List<ReadOnlyMemory<byte>> BufferedMessages { get; }
+        protected int CurrentCallBufferSize { get; set; }
         protected bool BufferedCurrentMessage { get; set; }
 
-        protected RetryCallBase(GrpcChannel channel, Method<TRequest, TResponse> method, CallOptions options, string loggerName)
+        protected RetryCallBase(GrpcChannel channel, Method<TRequest, TResponse> method, CallOptions options, string loggerName, int retryAttempts)
         {
             Logger = channel.LoggerFactory.CreateLogger(loggerName);
             Channel = channel;
@@ -83,6 +85,16 @@ namespace Grpc.Net.Client.Internal.Retry
             if (HasClientStream())
             {
                 NewActiveCallTcs = new TaskCompletionSource<IGrpcCall<TRequest, TResponse>?>(TaskCreationOptions.None);
+            }
+
+            if (retryAttempts > Channel.MaxRetryAttempts)
+            {
+                // TODO(JamesNK) - Log
+                MaxRetryAttempts = Channel.MaxRetryAttempts.GetValueOrDefault();
+            }
+            else
+            {
+                MaxRetryAttempts = retryAttempts;
             }
         }
 
@@ -261,7 +273,11 @@ namespace Grpc.Net.Client.Internal.Retry
                 if (!BufferedCurrentMessage)
                 {
                     messageData = SerializePayload(call, callOptions, message);
-                    BufferedMessages.Add(messageData);
+                    if (!TryAddToRetryBuffer(messageData))
+                    {
+                        CommitCall(call, CommitReason.BufferExceeded);
+                    }
+
                     BufferedCurrentMessage = true;
 
                     Log.MessageAddedToBuffer(Logger, messageData.Length);
@@ -286,6 +302,25 @@ namespace Grpc.Net.Client.Internal.Retry
 
             await call.WriteMessageAsync(writeStream, messageData, callOptions.CancellationToken).ConfigureAwait(false);
         }
+
+        protected void CommitCall(IGrpcCall<TRequest, TResponse> call, CommitReason commitReason)
+        {
+            lock (Lock)
+            {
+                if (!FinalizedCallTask.IsCompletedSuccessfully)
+                {
+                    OnCommitCall(call);
+
+                    // Log before committing for unit tests.
+                    Log.CallCommited(Logger, commitReason);
+
+                    NewActiveCallTcs?.SetResult(null);
+                    FinalizedCallTcs.SetResult(call);
+                }
+            }
+        }
+
+        protected abstract void OnCommitCall(IGrpcCall<TRequest, TResponse> call);
 
         protected bool HasClientStream()
         {
@@ -344,6 +379,35 @@ namespace Grpc.Net.Client.Internal.Retry
             }
 
             _disposed = true;
+        }
+
+        internal bool TryAddToRetryBuffer(ReadOnlyMemory<byte> message)
+        {
+            lock (Lock)
+            {
+                var messageSize = message.Length;
+                if (CurrentCallBufferSize + messageSize > Channel.MaxRetryBufferPerCallSize)
+                {
+                    return false;
+                }
+                if (!Channel.TryAddToRetryBuffer(messageSize))
+                {
+                    return false;
+                }
+
+                CurrentCallBufferSize += messageSize;
+                BufferedMessages.Add(message);
+                return true;
+            }
+        }
+
+        internal void RemoveFromRetryBuffer(int messageSize)
+        {
+            lock (Lock)
+            {
+                CurrentCallBufferSize -= messageSize;
+                Channel.RemoveFromRetryBuffer(messageSize);
+            }
         }
     }
 }

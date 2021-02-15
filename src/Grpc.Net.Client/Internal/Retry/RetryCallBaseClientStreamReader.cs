@@ -33,12 +33,9 @@ namespace Grpc.Net.Client.Internal.Retry
             _retryCallBase = retryCallBase;
         }
 
-        // Suppress warning when overriding interface definition
-#pragma warning disable CS8613, CS8766 // Nullability of reference types in return type doesn't match implicitly implemented member.
-        public TResponse? Current => _retryCallBase.FinalizedCallTask.IsCompletedSuccessfully
+        public TResponse Current => _retryCallBase.FinalizedCallTask.IsCompletedSuccessfully
                     ? _retryCallBase.FinalizedCallTask.Result.ClientStreamReader!.Current
-                    : null;
-#pragma warning restore CS8613, CS8766 // Nullability of reference types in return type doesn't match implicitly implemented member.
+                    : default!;
 
         public async Task<bool> MoveNext(CancellationToken cancellationToken)
         {
