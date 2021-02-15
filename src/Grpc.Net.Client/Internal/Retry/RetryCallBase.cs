@@ -40,6 +40,7 @@ namespace Grpc.Net.Client.Internal.Retry
 
         private RetryCallBaseClientStreamReader<TRequest, TResponse>? _retryBaseClientStreamReader;
         private RetryCallBaseClientStreamWriter<TRequest, TResponse>? _retryBaseClientStreamWriter;
+        private bool _disposed;
 
         protected object Lock { get; } = new object();
         protected ILogger Logger { get; }
@@ -48,6 +49,7 @@ namespace Grpc.Net.Client.Internal.Retry
         protected CallOptions Options { get; }
         protected TaskCompletionSource<IGrpcCall<TRequest, TResponse>> FinalizedCallTcs { get; }
         protected CancellationTokenSource CancellationTokenSource { get; }
+        protected TaskCompletionSource<IGrpcCall<TRequest, TResponse>?>? NewActiveCallTcs { get; set; }
 
         public Task<IGrpcCall<TRequest, TResponse>> FinalizedCallTask => FinalizedCallTcs.Task;
         public IAsyncStreamReader<TResponse>? ClientStreamReader => _retryBaseClientStreamReader ??= new RetryCallBaseClientStreamReader<TRequest, TResponse>(this);
@@ -76,6 +78,11 @@ namespace Grpc.Net.Client.Internal.Retry
             {
                 var timeout = CommonGrpcProtocolHelpers.GetTimerDueTime(deadline - Channel.Clock.UtcNow, Channel.MaxTimerDueTime);
                 CancellationTokenSource.CancelAfter(TimeSpan.FromMilliseconds(timeout));
+            }
+
+            if (HasClientStream())
+            {
+                NewActiveCallTcs = new TaskCompletionSource<IGrpcCall<TRequest, TResponse>?>(TaskCreationOptions.None);
             }
         }
 
@@ -111,7 +118,7 @@ namespace Grpc.Net.Client.Internal.Retry
             throw new InvalidOperationException("Can't get the call trailers because the call has not completed successfully.");
         }
 
-        public abstract void Dispose();
+        public void Dispose() => Dispose(true);
 
         public void StartUnary(TRequest request)
         {
@@ -285,9 +292,58 @@ namespace Grpc.Net.Client.Internal.Retry
             return Method.Type == MethodType.ClientStreaming || Method.Type == MethodType.DuplexStreaming;
         }
 
+        protected void SetNewActiveCall(IGrpcCall<TRequest, TResponse> call)
+        {
+            if (NewActiveCallTcs != null)
+            {
+                // Run continuation synchronously so awaiters execute inside the lock
+                NewActiveCallTcs.SetResult(call);
+                NewActiveCallTcs = new TaskCompletionSource<IGrpcCall<TRequest, TResponse>?>(TaskCreationOptions.None);
+            }
+        }
+
         Task IGrpcCall<TRequest, TResponse>.WriteClientStreamAsync<TState>(Func<GrpcCall<TRequest, TResponse>, Stream, CallOptions, TState, ValueTask> writeFunc, TState state)
         {
             throw new NotSupportedException();
+        }
+
+        protected async Task<IGrpcCall<TRequest, TResponse>?> GetActiveCallUnsynchronizedAsync(IGrpcCall<TRequest, TResponse>? previousCall)
+        {
+            Debug.Assert(NewActiveCallTcs != null);
+
+            var call = await NewActiveCallTcs.Task.ConfigureAwait(false);
+            if (call == null)
+            {
+                call = await FinalizedCallTask.ConfigureAwait(false);
+            }
+
+            // Avoid infinite loop.
+            if (call == previousCall)
+            {
+                return null;
+            }
+
+            return call;
+        }
+
+        protected virtual void Dispose(bool disposing)
+        {
+            if (_disposed)
+            {
+                return;
+            }
+
+            if (disposing)
+            {
+                CancellationTokenSource.Cancel();
+
+                if (FinalizedCallTask.IsCompletedSuccessfully)
+                {
+                    FinalizedCallTask.Result.Dispose();
+                }
+            }
+
+            _disposed = true;
         }
     }
 }

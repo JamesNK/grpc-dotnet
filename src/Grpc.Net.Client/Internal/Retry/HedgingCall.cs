@@ -37,7 +37,6 @@ namespace Grpc.Net.Client.Internal.Retry
 
         private readonly HedgingPolicy _hedgingPolicy;
 
-        private TaskCompletionSource<GrpcCall<TRequest, TResponse>?>? _newActiveCallTcs;
         private int _callsAttempted;
 
         private TaskCompletionSource<object?>? _pushbackReceivedTcs;
@@ -55,13 +54,6 @@ namespace Grpc.Net.Client.Internal.Retry
 
             if (_hedgingPolicy.HedgingDelay > TimeSpan.Zero)
             {
-                if (HasClientStream())
-                {
-                    // Active call TCS is only used if there is a client stream, and a hedging delay.
-                    // It is awaited when attempting to write to the client stream and there are no active calls.
-                    _newActiveCallTcs = new TaskCompletionSource<GrpcCall<TRequest, TResponse>?>(TaskCreationOptions.None);
-                }
-
                 _pushbackReceivedTcs = new TaskCompletionSource<object?>(TaskCreationOptions.None);
             }
 
@@ -108,12 +100,7 @@ namespace Grpc.Net.Client.Internal.Retry
 
                 startCallFunc(call);
 
-                if (_newActiveCallTcs != null)
-                {
-                    // Run continuation synchronously so awaiters execute inside the lock
-                    _newActiveCallTcs.SetResult(call);
-                    _newActiveCallTcs = new TaskCompletionSource<GrpcCall<TRequest, TResponse>?>(TaskCreationOptions.None);
-                }
+                SetNewActiveCall(call);
             }
 
             Status? responseStatus;
@@ -223,7 +210,7 @@ namespace Grpc.Net.Client.Internal.Retry
                     // Log before committing for unit tests.
                     Log.CallCommited(Logger, commitReason);
 
-                    _newActiveCallTcs?.SetResult(null);
+                    NewActiveCallTcs?.SetResult(null);
                     FinalizedCallTcs.SetResult(call);
                 }
             }
@@ -331,6 +318,7 @@ namespace Grpc.Net.Client.Internal.Retry
                     var completedTask = await Task.WhenAny(Task.Delay(hedgingDelay, CancellationTokenSource.Token), tcs.Task).ConfigureAwait(false);
                     if (completedTask != tcs.Task)
                     {
+                        // Task.Delay won. Check CTS to see if it won because of cancellation.
                         CancellationTokenSource.Token.ThrowIfCancellationRequested();
                         return;
                     }
@@ -354,17 +342,13 @@ namespace Grpc.Net.Client.Internal.Retry
             }
         }
 
-        public override void Dispose()
+        protected override void Dispose(bool disposing)
         {
             lock (Lock)
             {
-                CleanUpUnsynchronized();
+                base.Dispose(disposing);
 
-                // Finalized call has been removed from active calls. Dispose it explicitly.
-                if (FinalizedCallTask.IsCompletedSuccessfully)
-                {
-                    FinalizedCallTask.Result.Dispose();
-                }
+                CleanUpUnsynchronized();
             }
         }
 
@@ -402,24 +386,6 @@ namespace Grpc.Net.Client.Internal.Retry
             BufferedCurrentMessage = false;
         }
 
-        private async Task WaitForCallAsync(Func<IList<IGrpcCall<TRequest, TResponse>>, Task> action)
-        {
-            IGrpcCall<TRequest, TResponse>? call = null;
-
-            // If there is a hedge delay then wait for next call.
-            if (_newActiveCallTcs != null)
-            {
-                call = await _newActiveCallTcs.Task.ConfigureAwait(false);
-            }
-            // If there isn't a delay, or there are no more active calls then use the finalized call.
-            if (call == null)
-            {
-                call = await FinalizedCallTask.ConfigureAwait(false);
-            }
-
-            await action(new[] { call }).ConfigureAwait(false);
-        }
-
         private Task DoClientStreamActionAsync(Func<IList<IGrpcCall<TRequest, TResponse>>, Task> action)
         {
             lock (Lock)
@@ -430,8 +396,14 @@ namespace Grpc.Net.Client.Internal.Retry
                 }
                 else
                 {
-                    return WaitForCallAsync(action);
+                    return WaitForCallUnsynchronizedAsync(action);
                 }
+            }
+
+            async Task WaitForCallUnsynchronizedAsync(Func<IList<IGrpcCall<TRequest, TResponse>>, Task> action)
+            {
+                var call = await GetActiveCallUnsynchronizedAsync(previousCall: null).ConfigureAwait(false);
+                await action(new[] { call! }).ConfigureAwait(false);
             }
         }
     }

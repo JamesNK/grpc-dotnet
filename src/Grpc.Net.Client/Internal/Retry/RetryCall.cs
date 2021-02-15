@@ -42,7 +42,6 @@ namespace Grpc.Net.Client.Internal.Retry
         private int _nextRetryDelayMilliseconds;
 
         private GrpcCall<TRequest, TResponse>? _activeCall;
-        private TaskCompletionSource<IGrpcCall<TRequest, TResponse>?> _newActiveCallTcs;
 
         public RetryCall(RetryPolicy retryPolicy, GrpcChannel channel, Method<TRequest, TResponse> method, CallOptions options)
             : base(channel, method, options, LoggerName)
@@ -50,8 +49,6 @@ namespace Grpc.Net.Client.Internal.Retry
             _retryPolicy = retryPolicy;
 
             _random = new Random();
-
-            _newActiveCallTcs = new TaskCompletionSource<IGrpcCall<TRequest, TResponse>?>(TaskCreationOptions.RunContinuationsAsynchronously);
 
             ValidatePolicy(retryPolicy);
 
@@ -149,8 +146,7 @@ namespace Grpc.Net.Client.Internal.Retry
 
                     _attemptCount++;
 
-                    _newActiveCallTcs.TrySetResult(currentCall);
-                    _newActiveCallTcs = new TaskCompletionSource<IGrpcCall<TRequest, TResponse>?>(TaskCreationOptions.RunContinuationsAsynchronously);
+                    SetNewActiveCall(currentCall);
                 }
 
                 Status? responseStatus;
@@ -176,12 +172,7 @@ namespace Grpc.Net.Client.Internal.Retry
                 if (responseStatus == null)
                 {
                     // Headers were returned. We're commited.
-                    lock (Lock)
-                    {
-                        FinalizedCallTcs.SetResult(currentCall);
-                        _newActiveCallTcs.TrySetResult(null);
-                        _activeCall = null;
-                    }
+                    SetCommitedCall(currentCall);
 
                     responseStatus = await currentCall.CallTask.ConfigureAwait(false);
                     if (responseStatus.GetValueOrDefault().StatusCode == StatusCode.OK)
@@ -278,17 +269,19 @@ namespace Grpc.Net.Client.Internal.Retry
         {
             lock (Lock)
             {
-                _newActiveCallTcs.TrySetResult(null);
+                NewActiveCallTcs?.TrySetResult(null);
                 FinalizedCallTcs.TrySetResult(currentCall);
                 _activeCall = null;
             }
         }
 
-        public override void Dispose()
+        protected override void Dispose(bool disposing)
         {
             lock (Lock)
             {
-                CancellationTokenSource.Cancel();
+                base.Dispose(disposing);
+
+                _activeCall?.Dispose();
             }
         }
 
@@ -349,34 +342,21 @@ namespace Grpc.Net.Client.Internal.Retry
             }
         }
 
-        private async Task<IGrpcCall<TRequest, TResponse>?> GetActiveCallAsync(IGrpcCall<TRequest, TResponse>? previousCall)
+        private Task<IGrpcCall<TRequest, TResponse>?> GetActiveCallAsync(IGrpcCall<TRequest, TResponse>? previousCall)
         {
-            Task<IGrpcCall<TRequest, TResponse>?> newActiveCallTask;
+            Debug.Assert(NewActiveCallTcs != null);
+
             lock (Lock)
             {
                 // Return currently active call if there is one, and its not the previous call.
                 if (_activeCall != null && previousCall != _activeCall)
                 {
-                    return _activeCall;
+                    return Task.FromResult<IGrpcCall<TRequest, TResponse>?>(_activeCall);
                 }
 
                 // Wait to see whether new call will be made
-                newActiveCallTask = _newActiveCallTcs.Task;
+                return GetActiveCallUnsynchronizedAsync(previousCall);
             }
-
-            var call = await newActiveCallTask.ConfigureAwait(false);
-            if (call == null)
-            {
-                call = await FinalizedCallTask.ConfigureAwait(false);
-            }
-
-            // Avoid infinite loop.
-            if (call == previousCall)
-            {
-                return null;
-            }
-
-            return call;
         }
     }
 }
