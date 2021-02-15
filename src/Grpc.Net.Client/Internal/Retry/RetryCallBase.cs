@@ -90,7 +90,7 @@ namespace Grpc.Net.Client.Internal.Retry
 
             if (retryAttempts > Channel.MaxRetryAttempts)
             {
-                // TODO(JamesNK) - Log
+                Log.MaxAttemptsLimited(Logger, retryAttempts, Channel.MaxRetryAttempts.GetValueOrDefault());
                 MaxRetryAttempts = Channel.MaxRetryAttempts.GetValueOrDefault();
             }
             else

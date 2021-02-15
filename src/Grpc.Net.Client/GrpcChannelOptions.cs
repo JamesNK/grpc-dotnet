@@ -69,6 +69,10 @@ namespace Grpc.Net.Client
         /// Gets or sets the maximum retry attempts. This value limits any retry and hedging attempt values specified in
         /// the service config.
         /// <para>
+        /// Setting this value alone doesn't enable retries. Retries are enabled in the service config, which can be done
+        /// using <see cref="ServiceConfig"/>.
+        /// </para>
+        /// <para>
         /// A <c>null</c> value removes the maximum retry attempts limit. Defaults to 5.
         /// </para>
         /// </summary>
@@ -79,6 +83,10 @@ namespace Grpc.Net.Client
         /// or hedging calls. If the buffer limit is exceeded then no more retry attempts are made and all
         /// hedging calls but one will be canceled. This limit is applied across all calls made using the channel.
         /// <para>
+        /// Setting this value alone doesn't enable retries. Retries are enabled in the service config, which can be done
+        /// using <see cref="ServiceConfig"/>.
+        /// </para>
+        /// <para>
         /// A <c>null</c> value removes the maximum retry buffer size limit. Defaults to 16,777,216 (16 MB).
         /// </para>
         /// </summary>
@@ -88,6 +96,10 @@ namespace Grpc.Net.Client
         /// Gets or sets the maximum buffer size in bytes that can be used to store sent messages when retrying
         /// or hedging calls. If the buffer limit is exceeded then no more retry attempts are made and all
         /// hedging calls but one will be canceled. This limit is applied to one call.
+        /// <para>
+        /// Setting this value alone doesn't enable retries. Retries are enabled in the service config, which can be done
+        /// using <see cref="ServiceConfig"/>.
+        /// </para>
         /// <para>
         /// A <c>null</c> value removes the maximum retry buffer size limit per call. Defaults to 1,048,576 (1 MB).
         /// </para>
@@ -157,7 +169,9 @@ namespace Grpc.Net.Client
         public bool ThrowOperationCanceledOnCancellation { get; set; }
 
         /// <summary>
-        /// 
+        /// Gets or sets the service config for a gRPC channel. A service config allows service owners to publish parameters
+        /// to be automatically used by all clients of their service. A service config can also be specified by a client
+        /// using this property.
         /// </summary>
         public IDictionary<string, object>? ServiceConfig { get; set; }
 

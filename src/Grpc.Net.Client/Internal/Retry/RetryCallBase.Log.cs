@@ -55,6 +55,9 @@ namespace Grpc.Net.Client.Internal.Retry
             private static readonly Action<ILogger, Exception?> _stoppingHedgingCallTimer =
                 LoggerMessage.Define(LogLevel.Trace, new EventId(9, "StoppingHedgingCallTimer"), "Stopping hedging call timer.");
 
+            private static readonly Action<ILogger, int, int, Exception?> _maxAttemptsLimited =
+                LoggerMessage.Define<int, int>(LogLevel.Debug, new EventId(10, "MaxAttemptsLimited"), "The method has {ServiceConfigMaxAttempts} attempts specified in the service config. The number of attempts has been limited by channel configuration to {ChannelMaxAttempts}.");
+
             internal static void RetryEvaluated(ILogger logger, StatusCode statusCode, int attemptCount, bool willRetry)
             {
                 _retryEvaluated(logger, statusCode, attemptCount, willRetry, null);
@@ -98,6 +101,11 @@ namespace Grpc.Net.Client.Internal.Retry
             internal static void StoppingHedgingCallTimer(ILogger logger)
             {
                 _stoppingHedgingCallTimer(logger, null);
+            }
+
+            internal static void MaxAttemptsLimited(ILogger logger, int serviceConfigMaxAttempts, int channelMaxAttempts)
+            {
+                _maxAttemptsLimited(logger, serviceConfigMaxAttempts, channelMaxAttempts, null);
             }
         }
     }

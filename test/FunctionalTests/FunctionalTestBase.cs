@@ -47,9 +47,13 @@ namespace Grpc.AspNetCore.FunctionalTests
             var options = new GrpcChannelOptions
             {
                 LoggerFactory = LoggerFactory,
-                ServiceConfig = serviceConfig,
-                MaxRetryAttempts = maxRetryAttempts
+                ServiceConfig = serviceConfig
             };
+            // Don't overwrite default MaxRetryAttempts
+            if (maxRetryAttempts != null)
+            {
+                options.MaxRetryAttempts = maxRetryAttempts;
+            }
             if (useHandler)
             {
                 options.HttpHandler = Fixture.Handler;

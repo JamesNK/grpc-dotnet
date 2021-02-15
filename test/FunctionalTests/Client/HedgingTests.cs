@@ -150,7 +150,7 @@ namespace Grpc.AspNetCore.FunctionalTests.Client
 
             var method = Fixture.DynamicGrpc.AddDuplexStreamingMethod<StringValue, StringValue>(MessageUpload);
 
-            var channel = CreateChannel(serviceConfig: ServiceConfigHelpers.CreateHedgingServiceConfig(maxAttempts: 100, hedgingDelay: TimeSpan.Zero));
+            var channel = CreateChannel(serviceConfig: ServiceConfigHelpers.CreateHedgingServiceConfig(maxAttempts: 100, hedgingDelay: TimeSpan.Zero), maxRetryAttempts: 100);
 
             var client = TestClientFactory.Create(channel, method);
 
@@ -403,6 +403,38 @@ namespace Grpc.AspNetCore.FunctionalTests.Client
 
             Assert.AreEqual(1, callCount);
             AssertHasLog(LogLevel.Debug, "CallCommited", "Call commited. Reason: Throttled");
+        }
+
+        [TestCase(0)]
+        [TestCase(20)]
+        public async Task Unary_AttemptsGreaterThanDefaultClientLimit_LimitedAttemptsMade(int hedgingDelay)
+        {
+            var callCount = 0;
+            Task<DataMessage> UnaryFailure(DataMessage request, ServerCallContext context)
+            {
+                Interlocked.Increment(ref callCount);
+                return Task.FromException<DataMessage>(new RpcException(new Status(StatusCode.Unavailable, "")));
+            }
+
+            // Arrange
+            var method = Fixture.DynamicGrpc.AddUnaryMethod<DataMessage, DataMessage>(UnaryFailure);
+
+            var channel = CreateChannel(serviceConfig: ServiceConfigHelpers.CreateHedgingServiceConfig(maxAttempts: 10, hedgingDelay: TimeSpan.FromMilliseconds(hedgingDelay)));
+
+            var client = TestClientFactory.Create(channel, method);
+
+            // Act
+            var call = client.UnaryCall(new DataMessage());
+
+            // Assert
+            var ex = await ExceptionAssert.ThrowsAsync<RpcException>(() => call.ResponseAsync).DefaultTimeout();
+            Assert.AreEqual(StatusCode.Unavailable, ex.StatusCode);
+            Assert.AreEqual(StatusCode.Unavailable, call.GetStatus().StatusCode);
+
+            Assert.AreEqual(5, callCount);
+
+            AssertHasLog(LogLevel.Debug, "MaxAttemptsLimited", "The method has 10 attempts specified in the service config. The number of attempts has been limited by channel configuration to 5.");
+            AssertHasLog(LogLevel.Debug, "CallCommited", "Call commited. Reason: ExceededAttemptCount");
         }
     }
 }
