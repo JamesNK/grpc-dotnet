@@ -267,7 +267,7 @@ namespace Grpc.AspNetCore.FunctionalTests.Client
 
             // Assert
             var ex = await ExceptionAssert.ThrowsAsync<RpcException>(() => call.ResponseStream.MoveNext(CancellationToken.None)).DefaultTimeout();
-            Assert.AreEqual(StatusCode.DeadlineExceeded, ex.StatusCode); 
+            Assert.AreEqual(StatusCode.DeadlineExceeded, ex.StatusCode);
 
             ex = await ExceptionAssert.ThrowsAsync<RpcException>(() => call.RequestStream.WriteAsync(new DataMessage())).DefaultTimeout();
             Assert.AreEqual(StatusCode.DeadlineExceeded, ex.StatusCode);

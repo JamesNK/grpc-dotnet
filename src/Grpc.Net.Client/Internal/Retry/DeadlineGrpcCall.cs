@@ -29,14 +29,14 @@ namespace Grpc.Net.Client.Internal.Retry
         where TResponse : class
     {
         private readonly Status _status;
+        private IClientStreamWriter<TRequest>? _clientStreamWriter;
+        private IAsyncStreamReader<TResponse>? _clientStreamReader;
 
-        public IClientStreamWriter<TRequest>? ClientStreamWriter { get; }
-        public IAsyncStreamReader<TResponse>? ClientStreamReader { get; }
+        public IClientStreamWriter<TRequest>? ClientStreamWriter => _clientStreamWriter ??= new StatusClientStreamWriter(_status);
+        public IAsyncStreamReader<TResponse>? ClientStreamReader => _clientStreamReader ??= new StatusStreamReader(_status);
 
         public StatusGrpcCall(Status status)
         {
-            ClientStreamWriter = new StatusClientStreamWriter(status);
-            ClientStreamReader = new StatusStreamReader(status);
             _status = status;
         }
 

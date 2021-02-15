@@ -206,8 +206,6 @@ namespace Grpc.Net.Client.Internal.Retry
 
         private void CleanUpUnsynchronized()
         {
-            CancellationTokenSource.Cancel();
-
             while (_activeCalls.Count > 0)
             {
                 _activeCalls[_activeCalls.Count - 1].Dispose();
@@ -264,7 +262,7 @@ namespace Grpc.Net.Client.Internal.Retry
                         {
                             if (Channel.RetryThrottling?.IsRetryThrottlingActive() ?? false && _activeCalls.Count == 0)
                             {
-                                CommitCall(ThrottledCall, CommitReason.Throttled);
+                                CommitCall(CreateStatusCall(GrpcProtocolConstants.ThrottledStatus), CommitReason.Throttled);
                                 break;
                             }
                         }
@@ -273,22 +271,7 @@ namespace Grpc.Net.Client.Internal.Retry
             }
             catch (Exception ex)
             {
-                // Cancellation token triggered by dispose could throw here.
-                if (ex is OperationCanceledException && CancellationTokenSource.IsCancellationRequested)
-                {
-                    // Cancellation could have been caused by an exceeded deadline.
-                    if (IsDeadlineExceeded())
-                    {
-                        // An exceeded deadline inbetween calls means there is no active call.
-                        // Create a fake call that returns exceeded deadline status to the app.
-                        CommitCall(DeadlineCall, CommitReason.DeadlineExceeded);
-                    }
-                }
-                else
-                {
-                    // Only log unexpected errors.
-                    Log.ErrorRetryingCall(Logger, ex);
-                }
+                HandleUnexpectedError(ex);
             }
             finally
             {

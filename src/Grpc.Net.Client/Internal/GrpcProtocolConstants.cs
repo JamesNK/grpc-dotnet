@@ -22,6 +22,7 @@ using System.Diagnostics;
 using System.Linq;
 using System.Net.Http.Headers;
 using System.Reflection;
+using Grpc.Core;
 using Grpc.Net.Compression;
 
 namespace Grpc.Net.Client.Internal
@@ -60,6 +61,11 @@ namespace Grpc.Net.Client.Internal
         internal static readonly string UserAgentHeaderValue;
         internal static readonly string TEHeader;
         internal static readonly string TEHeaderValue;
+
+        internal static readonly Status DeadlineExceededStatus = new Status(StatusCode.DeadlineExceeded, string.Empty);
+        internal static readonly Status ThrottledStatus = new Status(StatusCode.Cancelled, "Retries stopped because retry throttling is active.");
+        internal static readonly Status ClientCanceledStatus = new Status(StatusCode.Cancelled, "Call canceled by the client.");
+        internal static readonly Status DisposeCanceledStatus = new Status(StatusCode.Cancelled, "gRPC call disposed.");
 
         static GrpcProtocolConstants()
         {

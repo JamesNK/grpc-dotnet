@@ -307,5 +307,64 @@ namespace Grpc.Net.Client.Tests.Retry
             Assert.AreEqual(StatusCode.Cancelled, hedgingCall.GetStatus().StatusCode);
             Assert.AreEqual("Retries stopped because retry throttling is active.", hedgingCall.GetStatus().Detail);
         }
+
+        [Test]
+        public async Task AsyncUnaryCall_CancellationDuringBackoff_CanceledStatus()
+        {
+            // Arrange
+            var callCount = 0;
+            var httpClient = ClientTestHelpers.CreateTestClient(async request =>
+            {
+                Interlocked.Increment(ref callCount);
+
+                await request.Content!.CopyToAsync(new MemoryStream());
+                return ResponseUtils.CreateHeadersOnlyResponse(HttpStatusCode.OK, StatusCode.Unavailable, retryPushbackHeader: TimeSpan.FromSeconds(10).TotalMilliseconds.ToString());
+            });
+            var cts = new CancellationTokenSource();
+            var serviceConfig = ServiceConfigHelpers.CreateHedgingServiceConfig(hedgingDelay: TimeSpan.FromSeconds(10));
+            var invoker = HttpClientCallInvokerFactory.Create(httpClient, serviceConfig: serviceConfig);
+            var hedgingCall = new HedgingCall<HelloRequest, HelloReply>(serviceConfig.MethodConfigs[0].HedgingPolicy!, invoker.Channel, ClientTestHelpers.ServiceMethod, new CallOptions(cancellationToken: cts.Token));
+
+            // Act
+            hedgingCall.StartUnary(new HelloRequest());
+
+            // Assert
+            await TestHelpers.AssertIsTrueRetryAsync(() => hedgingCall._activeCalls.Count == 0, "Wait for all calls to fail.").DefaultTimeout();
+
+            cts.Cancel();
+
+            var ex = await ExceptionAssert.ThrowsAsync<RpcException>(() => hedgingCall.GetResponseAsync()).DefaultTimeout();
+            Assert.AreEqual(StatusCode.Cancelled, ex.StatusCode);
+            Assert.AreEqual("Call canceled by the client.", ex.Status.Detail);
+        }
+
+        [Test]
+        public async Task AsyncUnaryCall_DisposeDuringBackoff_CanceledStatus()
+        {
+            // Arrange
+            var callCount = 0;
+            var httpClient = ClientTestHelpers.CreateTestClient(async request =>
+            {
+                Interlocked.Increment(ref callCount);
+
+                await request.Content!.CopyToAsync(new MemoryStream());
+                return ResponseUtils.CreateHeadersOnlyResponse(HttpStatusCode.OK, StatusCode.Unavailable, retryPushbackHeader: TimeSpan.FromSeconds(10).TotalMilliseconds.ToString());
+            });
+            var serviceConfig = ServiceConfigHelpers.CreateHedgingServiceConfig(hedgingDelay: TimeSpan.FromSeconds(10));
+            var invoker = HttpClientCallInvokerFactory.Create(httpClient, serviceConfig: serviceConfig);
+            var hedgingCall = new HedgingCall<HelloRequest, HelloReply>(serviceConfig.MethodConfigs[0].HedgingPolicy!, invoker.Channel, ClientTestHelpers.ServiceMethod, new CallOptions());
+
+            // Act
+            hedgingCall.StartUnary(new HelloRequest());
+
+            // Assert
+            await TestHelpers.AssertIsTrueRetryAsync(() => hedgingCall._activeCalls.Count == 0, "Wait for all calls to fail.").DefaultTimeout();
+
+            hedgingCall.Dispose();
+
+            var ex = await ExceptionAssert.ThrowsAsync<RpcException>(() => hedgingCall.GetResponseAsync()).DefaultTimeout();
+            Assert.AreEqual(StatusCode.Cancelled, ex.StatusCode);
+            Assert.AreEqual("gRPC call disposed.", ex.Status.Detail);
+        }
     }
 }

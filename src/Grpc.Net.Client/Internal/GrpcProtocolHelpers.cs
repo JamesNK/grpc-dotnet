@@ -28,6 +28,7 @@ using System.Net.Sockets;
 using System.Threading.Tasks;
 using Grpc.Core;
 using Grpc.Net.Compression;
+using Grpc.Shared;
 
 namespace Grpc.Net.Client.Internal
 {
@@ -410,6 +411,14 @@ namespace Grpc.Net.Client.Internal
             } while ((current = current.InnerException) != null);
 
             return StatusCode.Internal;
+        }
+
+        public static Status CreateStatusFromException(string summary, Exception ex)
+        {
+            var exceptionMessage = CommonGrpcProtocolHelpers.ConvertToRpcExceptionMessage(ex);
+            var statusCode = ResolveRpcExceptionStatusCode(ex);
+
+            return new Status(statusCode, summary + " " + exceptionMessage, ex);
         }
     }
 }

@@ -171,7 +171,7 @@ namespace Grpc.Net.Client.Internal
             {
                 Disposed = true;
 
-                Cleanup(new Status(StatusCode.Cancelled, "gRPC call disposed."));
+                Cleanup(GrpcProtocolConstants.DisposeCanceledStatus);
             }
         }
 
@@ -347,7 +347,7 @@ namespace Grpc.Net.Client.Internal
         {
             using (StartScope())
             {
-                CancelCall(new Status(StatusCode.Cancelled, "Call canceled by the client."));
+                CancelCall(GrpcProtocolConstants.ClientCanceledStatus);
             }
         }
 
@@ -604,10 +604,7 @@ namespace Grpc.Net.Client.Internal
             }
             else
             {
-                var exceptionMessage = CommonGrpcProtocolHelpers.ConvertToRpcExceptionMessage(ex);
-                var statusCode = GrpcProtocolHelpers.ResolveRpcExceptionStatusCode(ex);
-
-                status = new Status(statusCode, summary + " " + exceptionMessage, ex);
+                status = GrpcProtocolHelpers.CreateStatusFromException(summary, ex);
                 resolvedException = CreateRpcException(status.Value);
                 return true;
             }

@@ -200,7 +200,8 @@ namespace Grpc.Net.Client.Tests.Retry
 
             // Assert
             var ex = await ExceptionAssert.ThrowsAsync<RpcException>(() => resultTask).DefaultTimeout();
-            Assert.AreEqual(StatusCode.Unavailable, ex.StatusCode);
+            Assert.AreEqual(StatusCode.Cancelled, ex.StatusCode);
+            Assert.AreEqual("gRPC call disposed.", ex.Status.Detail);
         }
 
         [TestCase("")]
@@ -263,6 +264,70 @@ namespace Grpc.Net.Client.Tests.Retry
             Assert.AreEqual(delayTask, completedTask); // Response task should finish after
             Assert.AreEqual(2, callCount);
             Assert.AreEqual("Hello world", rs.Message);
+        }
+
+        [Test]
+        public async Task AsyncUnaryCall_CancellationDuringBackoff_CanceledStatus()
+        {
+            // Arrange
+            var callCount = 0;
+            var httpClient = ClientTestHelpers.CreateTestClient(async request =>
+            {
+                callCount++;
+
+                await request.Content!.CopyToAsync(new MemoryStream());
+                return ResponseUtils.CreateHeadersOnlyResponse(HttpStatusCode.OK, StatusCode.Unavailable, retryPushbackHeader: TimeSpan.FromSeconds(10).TotalMilliseconds.ToString());
+            });
+            var serviceConfig = ServiceConfigHelpers.CreateRetryServiceConfig();
+            var invoker = HttpClientCallInvokerFactory.Create(httpClient, serviceConfig: serviceConfig);
+            var cts = new CancellationTokenSource();
+
+            // Act
+            var call = invoker.AsyncUnaryCall<HelloRequest, HelloReply>(ClientTestHelpers.ServiceMethod, string.Empty, new CallOptions(cancellationToken: cts.Token), new HelloRequest { Name = "World" });
+
+            var delayTask = Task.Delay(100);
+            var completedTask = await Task.WhenAny(call.ResponseAsync, delayTask);
+
+            // Assert
+            Assert.AreEqual(delayTask, completedTask); // Ensure that we're waiting for retry
+
+            cts.Cancel();
+
+            var ex = await ExceptionAssert.ThrowsAsync<RpcException>(() => call.ResponseAsync).DefaultTimeout();
+            Assert.AreEqual(StatusCode.Cancelled, ex.StatusCode);
+            Assert.AreEqual("Call canceled by the client.", ex.Status.Detail);
+        }
+
+        [Test]
+        public async Task AsyncUnaryCall_DisposeDuringBackoff_CanceledStatus()
+        {
+            // Arrange
+            var callCount = 0;
+            var httpClient = ClientTestHelpers.CreateTestClient(async request =>
+            {
+                callCount++;
+
+                await request.Content!.CopyToAsync(new MemoryStream());
+                return ResponseUtils.CreateHeadersOnlyResponse(HttpStatusCode.OK, StatusCode.Unavailable, retryPushbackHeader: TimeSpan.FromSeconds(10).TotalMilliseconds.ToString());
+            });
+            var serviceConfig = ServiceConfigHelpers.CreateRetryServiceConfig();
+            var invoker = HttpClientCallInvokerFactory.Create(httpClient, serviceConfig: serviceConfig);
+            var cts = new CancellationTokenSource();
+
+            // Act
+            var call = invoker.AsyncUnaryCall<HelloRequest, HelloReply>(ClientTestHelpers.ServiceMethod, string.Empty, new CallOptions(cancellationToken: cts.Token), new HelloRequest { Name = "World" });
+
+            var delayTask = Task.Delay(100);
+            var completedTask = await Task.WhenAny(call.ResponseAsync, delayTask);
+
+            // Assert
+            Assert.AreEqual(delayTask, completedTask); // Ensure that we're waiting for retry
+
+            call.Dispose();
+
+            var ex = await ExceptionAssert.ThrowsAsync<RpcException>(() => call.ResponseAsync).DefaultTimeout();
+            Assert.AreEqual(StatusCode.Cancelled, ex.StatusCode);
+            Assert.AreEqual("gRPC call disposed.", ex.Status.Detail);
         }
 
         [Test]

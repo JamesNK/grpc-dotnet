@@ -33,14 +33,9 @@ namespace Grpc.Net.Client.Internal.Retry
         where TRequest : class
         where TResponse : class
     {
-        private static StatusGrpcCall<TRequest, TResponse>? _deadlineCall;
-        protected static StatusGrpcCall<TRequest, TResponse> DeadlineCall => _deadlineCall ??= new StatusGrpcCall<TRequest, TResponse>(new Status(StatusCode.DeadlineExceeded, string.Empty));
-        private static StatusGrpcCall<TRequest, TResponse>? _throttledCall;
-        protected static StatusGrpcCall<TRequest, TResponse> ThrottledCall => _throttledCall ??= new StatusGrpcCall<TRequest, TResponse>(new Status(StatusCode.Cancelled, "Retries stopped because retry throttling is active."));
-
         private RetryCallBaseClientStreamReader<TRequest, TResponse>? _retryBaseClientStreamReader;
         private RetryCallBaseClientStreamWriter<TRequest, TResponse>? _retryBaseClientStreamWriter;
-        private bool _disposed;
+        private CancellationTokenRegistration? _ctsRegistration;
 
         protected object Lock { get; } = new object();
         protected ILogger Logger { get; }
@@ -51,6 +46,7 @@ namespace Grpc.Net.Client.Internal.Retry
         protected TaskCompletionSource<IGrpcCall<TRequest, TResponse>> FinalizedCallTcs { get; }
         protected CancellationTokenSource CancellationTokenSource { get; }
         protected TaskCompletionSource<IGrpcCall<TRequest, TResponse>?>? NewActiveCallTcs { get; set; }
+        protected bool Disposed { get; private set; }
 
         public Task<IGrpcCall<TRequest, TResponse>> FinalizedCallTask => FinalizedCallTcs.Task;
         public IAsyncStreamReader<TResponse>? ClientStreamReader => _retryBaseClientStreamReader ??= new RetryCallBaseClientStreamReader<TRequest, TResponse>(this);
@@ -71,6 +67,11 @@ namespace Grpc.Net.Client.Internal.Retry
             Options = options;
             FinalizedCallTcs = new TaskCompletionSource<IGrpcCall<TRequest, TResponse>>(TaskCreationOptions.RunContinuationsAsynchronously);
             BufferedMessages = new List<ReadOnlyMemory<byte>>();
+
+            if (options.CancellationToken.CanBeCanceled)
+            {
+                _ctsRegistration = options.CancellationToken.Register(state => ((RetryCallBase<TRequest, TResponse>)state!).CancellationTokenSource.Cancel(), this);
+            }
 
             CancellationTokenSource = new CancellationTokenSource();
 
@@ -329,6 +330,8 @@ namespace Grpc.Net.Client.Internal.Retry
 
         protected void SetNewActiveCall(IGrpcCall<TRequest, TResponse> call)
         {
+            Debug.Assert(!FinalizedCallTask.IsCompletedSuccessfully);
+
             if (NewActiveCallTcs != null)
             {
                 // Run continuation synchronously so awaiters execute inside the lock
@@ -363,13 +366,16 @@ namespace Grpc.Net.Client.Internal.Retry
 
         protected virtual void Dispose(bool disposing)
         {
-            if (_disposed)
+            if (Disposed)
             {
                 return;
             }
 
+            Disposed = true;
+
             if (disposing)
             {
+                _ctsRegistration?.Dispose();
                 CancellationTokenSource.Cancel();
 
                 if (FinalizedCallTask.IsCompletedSuccessfully)
@@ -377,8 +383,6 @@ namespace Grpc.Net.Client.Internal.Retry
                     FinalizedCallTask.Result.Dispose();
                 }
             }
-
-            _disposed = true;
         }
 
         internal bool TryAddToRetryBuffer(ReadOnlyMemory<byte> message)
@@ -408,6 +412,45 @@ namespace Grpc.Net.Client.Internal.Retry
                 CurrentCallBufferSize -= messageSize;
                 Channel.RemoveFromRetryBuffer(messageSize);
             }
+        }
+
+        protected StatusGrpcCall<TRequest, TResponse> CreateStatusCall(Status status)
+        {
+            return new StatusGrpcCall<TRequest, TResponse>(status);
+        }
+
+        protected void HandleUnexpectedError(Exception ex)
+        {
+            IGrpcCall<TRequest, TResponse> resolvedCall;
+            CommitReason commitReason;
+
+            // Cancellation token triggered by dispose could throw here.
+            if (ex is OperationCanceledException && CancellationTokenSource.IsCancellationRequested)
+            {
+                // Cancellation could have been caused by an exceeded deadline.
+                if (IsDeadlineExceeded())
+                {
+                    commitReason = CommitReason.DeadlineExceeded;
+                    // An exceeded deadline inbetween calls means there is no active call.
+                    // Create a fake call that returns exceeded deadline status to the app.
+                    resolvedCall = CreateStatusCall(GrpcProtocolConstants.DeadlineExceededStatus);
+                }
+                else
+                {
+                    commitReason = CommitReason.Canceled;
+                    resolvedCall = CreateStatusCall(Disposed ? GrpcProtocolConstants.DisposeCanceledStatus : GrpcProtocolConstants.ClientCanceledStatus);
+                }
+            }
+            else
+            {
+                commitReason = CommitReason.UnexpectedError;
+                resolvedCall = CreateStatusCall(GrpcProtocolHelpers.CreateStatusFromException("Unexpected error during retry.", ex));
+
+                // Only log unexpected errors.
+                Log.ErrorRetryingCall(Logger, ex);
+            }
+
+            CommitCall(resolvedCall, commitReason);
         }
     }
 }

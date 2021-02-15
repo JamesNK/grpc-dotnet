@@ -229,7 +229,7 @@ namespace Grpc.Net.Client.Internal.Retry
                         // Handle the situation where the call failed with a non-deadline status, but retry
                         // didn't happen because of deadline exceeded.
                         IGrpcCall<TRequest, TResponse> resolvedCall = (IsDeadlineExceeded() && !(currentCall.CallTask.IsCompletedSuccessfully && currentCall.CallTask.Result.StatusCode == StatusCode.DeadlineExceeded))
-                            ? DeadlineCall
+                            ? CreateStatusCall(GrpcProtocolConstants.DeadlineExceededStatus)
                             : currentCall;
 
                         // Can't retry.
@@ -240,34 +240,7 @@ namespace Grpc.Net.Client.Internal.Retry
                 }
                 catch (Exception ex)
                 {
-                    IGrpcCall<TRequest, TResponse> resolvedCall = currentCall;
-                    CommitReason commitReason;
-
-                    // Cancellation token triggered by dispose could throw here.
-                    if (ex is OperationCanceledException && CancellationTokenSource.IsCancellationRequested)
-                    {
-                        // Cancellation could have been caused by an exceeded deadline.
-                        if (IsDeadlineExceeded())
-                        {
-                            commitReason = CommitReason.DeadlineExceeded;
-                            // An exceeded deadline inbetween calls means there is no active call.
-                            // Create a fake call that returns exceeded deadline status to the app.
-                            resolvedCall = DeadlineCall;
-                        }
-                        else
-                        {
-                            commitReason = CommitReason.Canceled;
-                        }
-                    }
-                    else
-                    {
-                        commitReason = CommitReason.UnexpectedError;
-
-                        // Only log unexpected errors.
-                        Log.ErrorRetryingCall(Logger, ex);
-                    }
-
-                    CommitCall(resolvedCall, commitReason);
+                    HandleUnexpectedError(ex);
                     return;
                 }
             }
