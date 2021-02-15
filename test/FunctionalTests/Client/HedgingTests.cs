@@ -18,6 +18,9 @@
 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
+using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
@@ -64,13 +67,35 @@ namespace Grpc.AspNetCore.FunctionalTests.Client
             Assert.AreEqual(StatusCode.Unavailable, ex.StatusCode);
             Assert.AreEqual(StatusCode.Unavailable, call.GetStatus().StatusCode);
 
-            AssertHasLog(LogLevel.Debug, "CallCommited", "Call commited. Reason: FinalCall");
+            AssertHasLog(LogLevel.Debug, "CallCommited", "Call commited. Reason: MaxAttempts");
         }
 
         [Test]
         public async Task Duplex_ManyParallelRequests_MessageRoundTripped()
         {
-            var attempts = 100;
+            const string ImportantMessage =
+@"       _____  _____   _____ 
+       |  __ \|  __ \ / ____|
+   __ _| |__) | |__) | |     
+  / _` |  _  /|  ___/| |     
+ | (_| | | \ \| |    | |____ 
+  \__, |_|  \_\_|     \_____|
+   __/ |                     
+  |___/                      
+  _                          
+ (_)                         
+  _ ___                      
+ | / __|                     
+ | \__ \          _          
+ |_|___/         | |         
+   ___ ___   ___ | |         
+  / __/ _ \ / _ \| |         
+ | (_| (_) | (_) | |         
+  \___\___/ \___/|_|         
+                             
+                             ";
+
+        var attempts = 100;
             var allUploads = new List<string>();
             var allCompletedTasks = new List<Task>();
             var tcs = new TaskCompletionSource<object?>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -158,26 +183,226 @@ namespace Grpc.AspNetCore.FunctionalTests.Client
             await Task.WhenAll(allCompletedTasks).DefaultTimeout();
         }
 
-        private static readonly string ImportantMessage =
-@"       _____  _____   _____ 
-       |  __ \|  __ \ / ____|
-   __ _| |__) | |__) | |     
-  / _` |  _  /|  ___/| |     
- | (_| | | \ \| |    | |____ 
-  \__, |_|  \_\_|     \_____|
-   __/ |                     
-  |___/                      
-  _                          
- (_)                         
-  _ ___                      
- | / __|                     
- | \__ \          _          
- |_|___/         | |         
-   ___ ___   ___ | |         
-  / __/ _ \ / _ \| |         
- | (_| (_) | (_) | |         
-  \___\___/ \___/|_|         
-                             
-                             ";
+        [TestCase(1)]
+        [TestCase(2)]
+        public async Task Unary_DeadlineExceedAfterServerCall_Failure(int exceptedServerCallCount)
+        {
+            var callCount = 0;
+            var tcs = new TaskCompletionSource<DataMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
+            Task<DataMessage> UnaryFailure(DataMessage request, ServerCallContext context)
+            {
+                callCount++;
+
+                if (callCount < exceptedServerCallCount)
+                {
+                    return Task.FromException<DataMessage>(new RpcException(new Status(StatusCode.DeadlineExceeded, "")));
+                }
+
+                return tcs.Task;
+            }
+
+            // Arrange
+            var method = Fixture.DynamicGrpc.AddUnaryMethod<DataMessage, DataMessage>(UnaryFailure);
+
+            var serviceConfig = ServiceConfigHelpers.CreateHedgingServiceConfig(nonFatalStatusCodes: new List<StatusCode> { StatusCode.DeadlineExceeded });
+            var channel = CreateChannel(serviceConfig: serviceConfig);
+
+            var client = TestClientFactory.Create(channel, method);
+
+            // Act
+            var call = client.UnaryCall(new DataMessage(), new CallOptions(deadline: DateTime.UtcNow.AddMilliseconds(200)));
+
+            // Assert
+            var ex = await ExceptionAssert.ThrowsAsync<RpcException>(() => call.ResponseAsync).DefaultTimeout();
+            Assert.AreEqual(StatusCode.DeadlineExceeded, ex.StatusCode);
+            Assert.AreEqual(StatusCode.DeadlineExceeded, call.GetStatus().StatusCode);
+
+            Assert.IsFalse(Logs.Any(l => l.EventId.Name == "DeadlineTimerRescheduled"));
+
+            tcs.SetResult(new DataMessage());
+        }
+
+        [Test]
+        public async Task Unary_DeadlineExceedDuringDelay_Failure()
+        {
+            var callCount = 0;
+            Task<DataMessage> UnaryFailure(DataMessage request, ServerCallContext context)
+            {
+                callCount++;
+
+                return Task.FromException<DataMessage>(new RpcException(new Status(StatusCode.DeadlineExceeded, "")));
+            }
+
+            // Arrange
+            var method = Fixture.DynamicGrpc.AddUnaryMethod<DataMessage, DataMessage>(UnaryFailure);
+
+            var serviceConfig = ServiceConfigHelpers.CreateHedgingServiceConfig(
+                hedgingDelay: TimeSpan.FromSeconds(10),
+                nonFatalStatusCodes: new List<StatusCode> { StatusCode.DeadlineExceeded });
+            var channel = CreateChannel(serviceConfig: serviceConfig);
+
+            var client = TestClientFactory.Create(channel, method);
+
+            // Act
+            var call = client.UnaryCall(new DataMessage(), new CallOptions(deadline: DateTime.UtcNow.AddMilliseconds(300)));
+
+            // Assert
+            var ex = await ExceptionAssert.ThrowsAsync<RpcException>(() => call.ResponseAsync).DefaultTimeout();
+            Assert.AreEqual(StatusCode.DeadlineExceeded, ex.StatusCode);
+            Assert.AreEqual(StatusCode.DeadlineExceeded, call.GetStatus().StatusCode);
+            Assert.AreEqual(1, callCount);
+
+            Assert.IsFalse(Logs.Any(l => l.EventId.Name == "DeadlineTimerRescheduled"));
+
+            AssertHasLog(LogLevel.Debug, "CallCommited", "Call commited. Reason: DeadlineExceeded");
+        }
+
+        [Test]
+        public async Task Duplex_DeadlineExceedDuringDelay_Failure()
+        {
+            var callCount = 0;
+            Task DuplexDeadlineExceeded(IAsyncStreamReader<DataMessage> requestStream, IServerStreamWriter<DataMessage> responseStream, ServerCallContext context)
+            {
+                callCount++;
+
+                return Task.FromException(new RpcException(new Status(StatusCode.DeadlineExceeded, "")));
+            }
+
+            // Arrange
+            var method = Fixture.DynamicGrpc.AddDuplexStreamingMethod<DataMessage, DataMessage>(DuplexDeadlineExceeded);
+
+            var serviceConfig = ServiceConfigHelpers.CreateHedgingServiceConfig(
+                hedgingDelay: TimeSpan.FromSeconds(10),
+                nonFatalStatusCodes: new List<StatusCode> { StatusCode.DeadlineExceeded });
+            var channel = CreateChannel(serviceConfig: serviceConfig);
+
+            var client = TestClientFactory.Create(channel, method);
+
+            // Act
+            var call = client.DuplexStreamingCall(new CallOptions(deadline: DateTime.UtcNow.AddMilliseconds(300)));
+
+            // Assert
+            var ex = await ExceptionAssert.ThrowsAsync<RpcException>(() => call.ResponseStream.MoveNext(CancellationToken.None)).DefaultTimeout();
+            Assert.AreEqual(StatusCode.DeadlineExceeded, ex.StatusCode);
+
+            ex = await ExceptionAssert.ThrowsAsync<RpcException>(() => call.RequestStream.WriteAsync(new DataMessage())).DefaultTimeout();
+            Assert.AreEqual(StatusCode.DeadlineExceeded, ex.StatusCode);
+
+            Assert.AreEqual(StatusCode.DeadlineExceeded, call.GetStatus().StatusCode);
+            Assert.AreEqual(1, callCount);
+
+            Assert.IsFalse(Logs.Any(l => l.EventId.Name == "DeadlineTimerRescheduled"));
+        }
+
+        [Test]
+        public async Task Unary_DeadlineExceedBeforeServerCall_Failure()
+        {
+            var callCount = 0;
+            var tcs = new TaskCompletionSource<DataMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
+            Task<DataMessage> UnaryFailure(DataMessage request, ServerCallContext context)
+            {
+                callCount++;
+                return tcs.Task;
+            }
+
+            // Arrange
+            var method = Fixture.DynamicGrpc.AddUnaryMethod<DataMessage, DataMessage>(UnaryFailure);
+
+            var serviceConfig = ServiceConfigHelpers.CreateHedgingServiceConfig(nonFatalStatusCodes: new List<StatusCode> { StatusCode.DeadlineExceeded });
+            var channel = CreateChannel(serviceConfig: serviceConfig);
+
+            var client = TestClientFactory.Create(channel, method);
+
+            // Act
+            var call = client.UnaryCall(new DataMessage(), new CallOptions(deadline: DateTime.UtcNow));
+
+            // Assert
+            var ex = await ExceptionAssert.ThrowsAsync<RpcException>(() => call.ResponseAsync).DefaultTimeout();
+            Assert.AreEqual(StatusCode.DeadlineExceeded, ex.StatusCode);
+            Assert.AreEqual(StatusCode.DeadlineExceeded, call.GetStatus().StatusCode);
+            Assert.AreEqual(0, callCount);
+
+            AssertHasLog(LogLevel.Debug, "CallCommited", "Call commited. Reason: DeadlineExceeded");
+
+            tcs.SetResult(new DataMessage());
+        }
+
+        [Test]
+        public async Task Unary_TriggerRetryThrottling_Failure()
+        {
+            var callCount = 0;
+            Task<DataMessage> UnaryFailure(DataMessage request, ServerCallContext context)
+            {
+                callCount++;
+                return Task.FromException<DataMessage>(new RpcException(new Status(StatusCode.Unavailable, "")));
+            }
+
+            // Arrange
+            var method = Fixture.DynamicGrpc.AddUnaryMethod<DataMessage, DataMessage>(UnaryFailure);
+
+            var channel = CreateChannel(serviceConfig: ServiceConfigHelpers.CreateHedgingServiceConfig(
+                hedgingDelay: TimeSpan.FromMilliseconds(100),
+                retryThrottling: new RetryThrottlingPolicy
+                {
+                    MaxTokens = 5,
+                    TokenRatio = 0.1
+                }));
+
+            var client = TestClientFactory.Create(channel, method);
+
+            // Act
+            var call = client.UnaryCall(new DataMessage());
+
+            // Assert
+            var ex = await ExceptionAssert.ThrowsAsync<RpcException>(() => call.ResponseAsync).DefaultTimeout();
+            Assert.AreEqual(StatusCode.Unavailable, ex.StatusCode);
+            Assert.AreEqual(StatusCode.Unavailable, call.GetStatus().StatusCode);
+
+            Assert.AreEqual(3, callCount);
+            AssertHasLog(LogLevel.Debug, "CallCommited", "Call commited. Reason: Throttled");
+        }
+
+        [TestCase(0)]
+        [TestCase(100)]
+        public async Task Unary_RetryThrottlingAlreadyActive_Failure(int hedgingDelayMilliseconds)
+        {
+            var callCount = 0;
+            Task<DataMessage> UnaryFailure(DataMessage request, ServerCallContext context)
+            {
+                callCount++;
+                return Task.FromException<DataMessage>(new RpcException(new Status(StatusCode.Unavailable, "")));
+            }
+
+            // Arrange
+            var method = Fixture.DynamicGrpc.AddUnaryMethod<DataMessage, DataMessage>(UnaryFailure);
+
+            var channel = CreateChannel(serviceConfig: ServiceConfigHelpers.CreateHedgingServiceConfig(
+                hedgingDelay: TimeSpan.FromMilliseconds(hedgingDelayMilliseconds),
+                retryThrottling: new RetryThrottlingPolicy
+                {
+                    MaxTokens = 5,
+                    TokenRatio = 0.1
+                }));
+
+            // Manually trigger retry throttling
+            Debug.Assert(channel.RetryThrottling != null);
+            channel.RetryThrottling.CallFailure();
+            channel.RetryThrottling.CallFailure();
+            channel.RetryThrottling.CallFailure();
+            Debug.Assert(channel.RetryThrottling.IsRetryThrottlingActive());
+
+            var client = TestClientFactory.Create(channel, method);
+
+            // Act
+            var call = client.UnaryCall(new DataMessage());
+
+            // Assert
+            var ex = await ExceptionAssert.ThrowsAsync<RpcException>(() => call.ResponseAsync).DefaultTimeout();
+            Assert.AreEqual(StatusCode.Unavailable, ex.StatusCode);
+            Assert.AreEqual(StatusCode.Unavailable, call.GetStatus().StatusCode);
+
+            Assert.AreEqual(1, callCount);
+            AssertHasLog(LogLevel.Debug, "CallCommited", "Call commited. Reason: Throttled");
+        }
     }
 }

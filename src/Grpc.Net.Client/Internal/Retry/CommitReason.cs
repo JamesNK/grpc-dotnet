@@ -23,7 +23,8 @@ namespace Grpc.Net.Client.Internal.Retry
     {
         ResponseHeadersReceived,
         FatelStatusCode,
-        FinalCall,
-        DeadlineExceeded
+        MaxAttempts,
+        DeadlineExceeded,
+        Throttled
     }
 }

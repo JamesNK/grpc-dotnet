@@ -208,7 +208,10 @@ namespace Grpc.AspNetCore.FunctionalTests.Client
             {
                 callCount++;
 
-                return Task.FromException<DataMessage>(new RpcException(new Status(StatusCode.Unavailable, "")));
+                return Task.FromException<DataMessage>(new RpcException(new Status(StatusCode.Unavailable, ""), new Metadata
+                {
+                    new Metadata.Entry("grpc-retry-pushback-ms", TimeSpan.FromSeconds(10).TotalMilliseconds.ToString())
+                }));
             }
 
             // Arrange
@@ -242,7 +245,10 @@ namespace Grpc.AspNetCore.FunctionalTests.Client
             {
                 callCount++;
 
-                return Task.FromException(new RpcException(new Status(StatusCode.Unavailable, "")));
+                return Task.FromException(new RpcException(new Status(StatusCode.Unavailable, ""), new Metadata
+                {
+                    new Metadata.Entry("grpc-retry-pushback-ms", TimeSpan.FromSeconds(10).TotalMilliseconds.ToString())
+                }));
             }
 
             // Arrange

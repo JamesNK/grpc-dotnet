@@ -24,25 +24,20 @@ using Grpc.Core;
 
 namespace Grpc.Net.Client.Internal.Retry
 {
-    internal sealed class DeadlineGrpcCall<TRequest, TResponse> : IGrpcCall<TRequest, TResponse>
+    internal sealed class StatusGrpcCall<TRequest, TResponse> : IGrpcCall<TRequest, TResponse>
         where TRequest : class
         where TResponse : class
     {
-        private static readonly Status DeadlineStatus = new Status(StatusCode.DeadlineExceeded, string.Empty);
-        private static DeadlineGrpcCall<TRequest, TResponse>? _instance;
-
-        public static DeadlineGrpcCall<TRequest, TResponse> Instance
-        {
-            get { return _instance ??= new DeadlineGrpcCall<TRequest, TResponse>(); }
-        }
+        private readonly Status _status;
 
         public IClientStreamWriter<TRequest>? ClientStreamWriter { get; }
         public IAsyncStreamReader<TResponse>? ClientStreamReader { get; }
 
-        public DeadlineGrpcCall()
+        public StatusGrpcCall(Status status)
         {
-            ClientStreamWriter = new DeadClientStreamWriter();
-            ClientStreamReader = new DeadlineStreamReader();
+            ClientStreamWriter = new StatusClientStreamWriter(status);
+            ClientStreamReader = new StatusStreamReader(status);
+            _status = status;
         }
 
         public void Dispose()
@@ -51,17 +46,17 @@ namespace Grpc.Net.Client.Internal.Retry
 
         public Task<TResponse> GetResponseAsync()
         {
-            return Task.FromException<TResponse>(new RpcException(DeadlineStatus));
+            return Task.FromException<TResponse>(new RpcException(_status));
         }
 
         public Task<Metadata> GetResponseHeadersAsync()
         {
-            return Task.FromException<Metadata>(new RpcException(DeadlineStatus));
+            return Task.FromException<Metadata>(new RpcException(_status));
         }
 
         public Status GetStatus()
         {
-            return DeadlineStatus;
+            return _status;
         }
 
         public Metadata GetTrailers()
@@ -91,31 +86,45 @@ namespace Grpc.Net.Client.Internal.Retry
 
         public Task WriteClientStreamAsync<TState>(Func<GrpcCall<TRequest, TResponse>, Stream, CallOptions, TState, ValueTask> writeFunc, TState state)
         {
-            return Task.FromException(new RpcException(DeadlineStatus));
+            return Task.FromException(new RpcException(_status));
         }
 
-        private sealed class DeadClientStreamWriter : IClientStreamWriter<TRequest>
+        private sealed class StatusClientStreamWriter : IClientStreamWriter<TRequest>
         {
+            private readonly Status _status;
+
             public WriteOptions? WriteOptions { get; set; }
+
+            public StatusClientStreamWriter(Status status)
+            {
+                _status = status;
+            }
 
             public Task CompleteAsync()
             {
-                return Task.FromException(new RpcException(DeadlineStatus));
+                return Task.FromException(new RpcException(_status));
             }
 
             public Task WriteAsync(TRequest message)
             {
-                return Task.FromException(new RpcException(DeadlineStatus));
+                return Task.FromException(new RpcException(_status));
             }
         }
 
-        private sealed class DeadlineStreamReader : IAsyncStreamReader<TResponse>
+        private sealed class StatusStreamReader : IAsyncStreamReader<TResponse>
         {
+            private readonly Status _status;
+
             public TResponse Current { get; set; } = default!;
+
+            public StatusStreamReader(Status status)
+            {
+                _status = status;
+            }
 
             public Task<bool> MoveNext(CancellationToken cancellationToken)
             {
-                return Task.FromException<bool>(new RpcException(DeadlineStatus));
+                return Task.FromException<bool>(new RpcException(_status));
             }
         }
     }

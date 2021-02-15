@@ -24,6 +24,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Grpc.Core;
+using Grpc.Shared;
 using Microsoft.Extensions.Logging;
 
 namespace Grpc.Net.Client.Internal.Retry
@@ -32,6 +33,11 @@ namespace Grpc.Net.Client.Internal.Retry
         where TRequest : class
         where TResponse : class
     {
+        private static StatusGrpcCall<TRequest, TResponse>? _deadlineCall;
+        protected static StatusGrpcCall<TRequest, TResponse> DeadlineCall => _deadlineCall ??= new StatusGrpcCall<TRequest, TResponse>(new Status(StatusCode.DeadlineExceeded, string.Empty));
+        private static StatusGrpcCall<TRequest, TResponse>? _throttledCall;
+        protected static StatusGrpcCall<TRequest, TResponse> ThrottledCall => _throttledCall ??= new StatusGrpcCall<TRequest, TResponse>(new Status(StatusCode.Cancelled, "Retries stopped because retry throttling is active."));
+
         private RetryCallBaseClientStreamReader<TRequest, TResponse>? _retryBaseClientStreamReader;
         private RetryCallBaseClientStreamWriter<TRequest, TResponse>? _retryBaseClientStreamWriter;
 
@@ -41,6 +47,7 @@ namespace Grpc.Net.Client.Internal.Retry
         protected Method<TRequest, TResponse> Method { get; }
         protected CallOptions Options { get; }
         protected TaskCompletionSource<IGrpcCall<TRequest, TResponse>> FinalizedCallTcs { get; }
+        protected CancellationTokenSource CancellationTokenSource { get; }
 
         public Task<IGrpcCall<TRequest, TResponse>> FinalizedCallTask => FinalizedCallTcs.Task;
         public IAsyncStreamReader<TResponse>? ClientStreamReader => _retryBaseClientStreamReader ??= new RetryCallBaseClientStreamReader<TRequest, TResponse>(this);
@@ -60,6 +67,16 @@ namespace Grpc.Net.Client.Internal.Retry
             Options = options;
             FinalizedCallTcs = new TaskCompletionSource<IGrpcCall<TRequest, TResponse>>(TaskCreationOptions.RunContinuationsAsynchronously);
             BufferedMessages = new List<ReadOnlyMemory<byte>>();
+
+            CancellationTokenSource = new CancellationTokenSource();
+
+            // TODO(JamesNK) - Check that large deadlines are supported. Might need to use a Timer here instead.
+            var deadline = Options.Deadline.GetValueOrDefault(DateTime.MaxValue);
+            if (deadline != DateTime.MaxValue)
+            {
+                var timeout = CommonGrpcProtocolHelpers.GetTimerDueTime(deadline - Channel.Clock.UtcNow, Channel.MaxTimerDueTime);
+                CancellationTokenSource.CancelAfter(TimeSpan.FromMilliseconds(timeout));
+            }
         }
 
         public async Task<TResponse> GetResponseAsync()

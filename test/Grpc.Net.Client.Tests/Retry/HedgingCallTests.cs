@@ -18,6 +18,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Net;
@@ -25,6 +26,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Greet;
 using Grpc.Core;
+using Grpc.Net.Client.Configuration;
 using Grpc.Net.Client.Internal;
 using Grpc.Net.Client.Internal.Retry;
 using Grpc.Net.Client.Tests.Infrastructure;
@@ -66,7 +68,7 @@ namespace Grpc.Net.Client.Tests.Retry
 
             // Act
             hedgingCall.StartUnary(new HelloRequest { Name = "World" });
-            Assert.IsNotNull(hedgingCall._createCallTimer);
+            Assert.IsFalse(hedgingCall.CreateHedgingCallsTask!.IsCompleted);
 
             // Assert
             Assert.AreEqual(1, hedgingCall._activeCalls.Count);
@@ -78,7 +80,7 @@ namespace Grpc.Net.Client.Tests.Retry
 
             hedgingCall.Dispose();
             Assert.AreEqual(0, hedgingCall._activeCalls.Count);
-            Assert.IsNull(hedgingCall._createCallTimer);
+            await hedgingCall.CreateHedgingCallsTask!.DefaultTimeout();
 
             waitUntilFinishedTcs.SetResult(null);
         }
@@ -124,7 +126,7 @@ namespace Grpc.Net.Client.Tests.Retry
 
             // Assert
             Assert.AreEqual(1, hedgingCall._activeCalls.Count);
-            Assert.IsNotNull(hedgingCall._createCallTimer);
+            Assert.IsFalse(hedgingCall.CreateHedgingCallsTask!.IsCompleted);
 
             await allCallsOnServerSyncPoint.WaitForSyncPoint().DefaultTimeout();
 
@@ -138,7 +140,7 @@ namespace Grpc.Net.Client.Tests.Retry
 
             // Fatal status code will cancel other calls
             Assert.AreEqual(0, hedgingCall._activeCalls.Count);
-            Assert.IsNull(hedgingCall._createCallTimer);
+            await hedgingCall.CreateHedgingCallsTask!.DefaultTimeout();
 
             waitUntilFinishedTcs.SetResult(null);
         }
@@ -188,7 +190,7 @@ namespace Grpc.Net.Client.Tests.Retry
 
             // Assert
             Assert.AreEqual(1, hedgingCall._activeCalls.Count);
-            Assert.IsNotNull(hedgingCall._createCallTimer);
+            Assert.IsFalse(hedgingCall.CreateHedgingCallsTask!.IsCompleted);
 
             await allCallsOnServerSyncPoint.WaitForSyncPoint().DefaultTimeout();
             allCallsOnServerSyncPoint.Continue();
@@ -205,7 +207,7 @@ namespace Grpc.Net.Client.Tests.Retry
             Assert.AreEqual("Hello world", responseMessage.Message);
 
             Assert.AreEqual(0, hedgingCall._activeCalls.Count);
-            Assert.IsNull(hedgingCall._createCallTimer);
+            await hedgingCall.CreateHedgingCallsTask!.DefaultTimeout();
         }
 
         [Test]
@@ -264,6 +266,46 @@ namespace Grpc.Net.Client.Tests.Retry
             Assert.AreEqual(StatusCode.OK, hedgingCall.GetStatus().StatusCode);
             Assert.AreEqual(2, callCount);
             Assert.AreEqual(0, hedgingCall._activeCalls.Count);
+        }
+
+        [Test]
+        public async Task RetryThrottling_BecomesActiveDuringDelay_CancelFailure()
+        {
+            // Arrange
+            var callCount = 0;
+            var httpClient = ClientTestHelpers.CreateTestClient(async request =>
+            {
+                Interlocked.Increment(ref callCount);
+
+                await request.Content!.CopyToAsync(new MemoryStream());
+                return ResponseUtils.CreateHeadersOnlyResponse(HttpStatusCode.OK, StatusCode.Unavailable);
+            });
+            var serviceConfig = ServiceConfigHelpers.CreateHedgingServiceConfig(
+                hedgingDelay: TimeSpan.FromMilliseconds(200),
+                retryThrottling: new RetryThrottlingPolicy
+                {
+                    MaxTokens = 5,
+                    TokenRatio = 0.1
+                });
+            var invoker = HttpClientCallInvokerFactory.Create(httpClient, serviceConfig: serviceConfig);
+            var hedgingCall = new HedgingCall<HelloRequest, HelloReply>(serviceConfig.MethodConfigs[0].HedgingPolicy!, invoker.Channel, ClientTestHelpers.ServiceMethod, new CallOptions());
+
+            // Act
+            hedgingCall.StartUnary(new HelloRequest());
+
+            // Assert
+            await TestHelpers.AssertIsTrueRetryAsync(() => hedgingCall._activeCalls.Count == 0, "Wait for all calls to fail.").DefaultTimeout();
+
+            Debug.Assert(invoker.Channel.RetryThrottling != null);
+            invoker.Channel.RetryThrottling.CallFailure();
+            invoker.Channel.RetryThrottling.CallFailure();
+            Debug.Assert(invoker.Channel.RetryThrottling.IsRetryThrottlingActive());
+
+            var ex = await ExceptionAssert.ThrowsAsync<RpcException>(() => hedgingCall.GetResponseAsync()).DefaultTimeout();
+            Assert.AreEqual(1, callCount);
+            Assert.AreEqual(StatusCode.Cancelled, ex.StatusCode);
+            Assert.AreEqual(StatusCode.Cancelled, hedgingCall.GetStatus().StatusCode);
+            Assert.AreEqual("Retries stopped because retry throttling is active.", hedgingCall.GetStatus().Detail);
         }
     }
 }

@@ -24,6 +24,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Grpc.Core;
 using Grpc.Net.Client.Configuration;
+using Microsoft.Extensions.Logging;
 
 namespace Grpc.Net.Client.Internal.Retry
 {
@@ -35,12 +36,16 @@ namespace Grpc.Net.Client.Internal.Retry
         private const string LoggerName = "Grpc.Net.Client.Internal.HedgingCall";
 
         private readonly HedgingPolicy _hedgingPolicy;
-        private TaskCompletionSource<GrpcCall<TRequest, TResponse>>? _newActiveCallTcs;
+
+        private TaskCompletionSource<GrpcCall<TRequest, TResponse>?>? _newActiveCallTcs;
         private int _callsAttempted;
 
+        private TaskCompletionSource<object?>? _pushbackReceivedTcs;
+        private TimeSpan? _pushbackDelay;
+
         // Internal for testing
-        internal Timer? _createCallTimer;
         internal List<IGrpcCall<TRequest, TResponse>> _activeCalls { get; }
+        internal Task? CreateHedgingCallsTask { get; set; }
 
         public HedgingCall(HedgingPolicy hedgingPolicy, GrpcChannel channel, Method<TRequest, TResponse> method, CallOptions options)
             : base(channel, method, options, LoggerName)
@@ -48,11 +53,16 @@ namespace Grpc.Net.Client.Internal.Retry
             _hedgingPolicy = hedgingPolicy;
             _activeCalls = new List<IGrpcCall<TRequest, TResponse>>();
 
-            // Active call TCS is only used if there is a client stream, and a hedging delay.
-            // It is awaited when attempting to write to the client stream and there are no active calls.
-            if (_hedgingPolicy.HedgingDelay > TimeSpan.Zero && HasClientStream())
+            if (_hedgingPolicy.HedgingDelay > TimeSpan.Zero)
             {
-                _newActiveCallTcs = new TaskCompletionSource<GrpcCall<TRequest, TResponse>>(TaskCreationOptions.None);
+                if (HasClientStream())
+                {
+                    // Active call TCS is only used if there is a client stream, and a hedging delay.
+                    // It is awaited when attempting to write to the client stream and there are no active calls.
+                    _newActiveCallTcs = new TaskCompletionSource<GrpcCall<TRequest, TResponse>?>(TaskCreationOptions.None);
+                }
+
+                _pushbackReceivedTcs = new TaskCompletionSource<object?>(TaskCreationOptions.None);
             }
 
             ValidatePolicy(hedgingPolicy);
@@ -102,7 +112,7 @@ namespace Grpc.Net.Client.Internal.Retry
                 {
                     // Run continuation synchronously so awaiters execute inside the lock
                     _newActiveCallTcs.SetResult(call);
-                    _newActiveCallTcs = new TaskCompletionSource<GrpcCall<TRequest, TResponse>>(TaskCreationOptions.None);
+                    _newActiveCallTcs = new TaskCompletionSource<GrpcCall<TRequest, TResponse>?>(TaskCreationOptions.None);
                 }
             }
 
@@ -152,13 +162,14 @@ namespace Grpc.Net.Client.Internal.Retry
                 }
                 else if (_hedgingPolicy.NonFatalStatusCodes.Contains(status.StatusCode))
                 {
-                    if (retryPushbackMS >= 0)
+                    // Pushback doesn't do anything if we started with no delay and all calls
+                    // have already been made when hedging starting.
+                    if (retryPushbackMS >= 0 && _pushbackReceivedTcs != null)
                     {
                         lock (Lock)
                         {
-                            _createCallTimer?.Change(
-                                TimeSpan.FromMilliseconds(retryPushbackMS.GetValueOrDefault()),
-                                _hedgingPolicy.HedgingDelay.GetValueOrDefault());
+                            _pushbackDelay = TimeSpan.FromMilliseconds(retryPushbackMS.GetValueOrDefault());
+                            _pushbackReceivedTcs.TrySetResult(null);
                         }
                     }
                     Channel.RetryThrottling?.CallFailure();
@@ -179,7 +190,12 @@ namespace Grpc.Net.Client.Internal.Retry
                 else if (_activeCalls.Count == 1 && _callsAttempted >= _hedgingPolicy.MaxAttempts.GetValueOrDefault())
                 {
                     // This is the last active call and no more will be made.
-                    CommitCall(call, CommitReason.FinalCall);
+                    CommitCall(call, CommitReason.MaxAttempts);
+                }
+                else if (_activeCalls.Count == 1 && (Channel.RetryThrottling?.IsRetryThrottlingActive() ?? false))
+                {
+                    // This is the last active call and throttling is active.
+                    CommitCall(call, CommitReason.Throttled);
                 }
                 else
                 {
@@ -194,20 +210,20 @@ namespace Grpc.Net.Client.Internal.Retry
             }
         }
 
-        private void CommitCall(GrpcCall<TRequest, TResponse> call, CommitReason commitReason)
+        private void CommitCall(IGrpcCall<TRequest, TResponse> call, CommitReason commitReason)
         {
             lock (Lock)
             {
                 if (!FinalizedCallTask.IsCompletedSuccessfully)
                 {
-                    var removed = _activeCalls.Remove(call);
-                    Debug.Assert(removed);
+                    _activeCalls.Remove(call);
 
                     CleanUpUnsynchronized();
 
                     // Log before committing for unit tests.
                     Log.CallCommited(Logger, commitReason);
 
+                    _newActiveCallTcs?.SetResult(null);
                     FinalizedCallTcs.SetResult(call);
                 }
             }
@@ -215,9 +231,8 @@ namespace Grpc.Net.Client.Internal.Retry
 
         private void CleanUpUnsynchronized()
         {
-            // Stop creating calls and cancel all others in progress.
-            _createCallTimer?.Dispose();
-            _createCallTimer = null;
+            CancellationTokenSource.Cancel();
+
             while (_activeCalls.Count > 0)
             {
                 _activeCalls[_activeCalls.Count - 1].Dispose();
@@ -234,39 +249,108 @@ namespace Grpc.Net.Client.Internal.Retry
                 while (_callsAttempted < _hedgingPolicy.MaxAttempts.GetValueOrDefault())
                 {
                     _ = StartCall(startCallFunc);
+
+                    // Don't send additional calls if retry throttling is active.
+                    if (Channel.RetryThrottling?.IsRetryThrottlingActive() ?? false)
+                    {
+                        // TODO(JamesNK) - Log
+                        break;
+                    }
                 }
             }
             else
             {
-                Log.StartingHedgingCallTimer(Logger, hedgingDelay);
-
-                // Create timer and set to field before setting time.
-                // Ensures there is no weird situation where the timer triggers
-                // before the field is set. 
-                _createCallTimer = new Timer(CreateCallCallback, startCallFunc, Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
-                _createCallTimer.Change(hedgingDelay, hedgingDelay);
-                _ = StartCall(startCallFunc);
+                CreateHedgingCallsTask = CreateHedgingCalls(startCallFunc);
             }
         }
 
-        private void CreateCallCallback(object? state)
+        private async Task CreateHedgingCalls(Action<GrpcCall<TRequest, TResponse>> startCallFunc)
         {
-            lock (Lock)
+            var hedgingDelay = _hedgingPolicy.HedgingDelay.GetValueOrDefault();
+
+            Log.StartingHedgingCallTimer(Logger, hedgingDelay);
+
+            try
             {
-                // Note that a new call could be started after the deadline has been exceeded.
-                // This is fine because the call will immediately have a deadline exceeded status
-                // and when its status is evaluated the timer will be stopped.
-                if (_callsAttempted < _hedgingPolicy.MaxAttempts.GetValueOrDefault())
+                while (_callsAttempted < _hedgingPolicy.MaxAttempts.GetValueOrDefault())
                 {
-                    _ = StartCall((Action<GrpcCall<TRequest, TResponse>>)state!);
+                    _ = StartCall(startCallFunc);
+
+                    await HedgingDelayAsync(hedgingDelay).ConfigureAwait(false);
+
+                    if (IsDeadlineExceeded())
+                    {
+                        CommitCall(new StatusGrpcCall<TRequest, TResponse>(new Status(StatusCode.DeadlineExceeded, string.Empty)), CommitReason.DeadlineExceeded);
+                        break;
+                    }
+                    else
+                    {
+                        lock (Lock)
+                        {
+                            if (Channel.RetryThrottling?.IsRetryThrottlingActive() ?? false && _activeCalls.Count == 0)
+                            {
+                                CommitCall(ThrottledCall, CommitReason.Throttled);
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                // Cancellation token triggered by dispose could throw here.
+                if (ex is OperationCanceledException && CancellationTokenSource.IsCancellationRequested)
+                {
+                    // Cancellation could have been caused by an exceeded deadline.
+                    if (IsDeadlineExceeded())
+                    {
+                        // An exceeded deadline inbetween calls means there is no active call.
+                        // Create a fake call that returns exceeded deadline status to the app.
+                        CommitCall(DeadlineCall, CommitReason.DeadlineExceeded);
+                    }
+                }
+                else
+                {
+                    // Only log unexpected errors.
+                    Log.ErrorRetryingCall(Logger, ex);
+                }
+            }
+            finally
+            {
+                Log.StoppingHedgingCallTimer(Logger);
+            }
+        }
+
+        private async Task HedgingDelayAsync(TimeSpan hedgingDelay)
+        {
+            while (true)
+            {
+                var tcs = _pushbackReceivedTcs;
+                if (tcs != null)
+                {
+                    var completedTask = await Task.WhenAny(Task.Delay(hedgingDelay, CancellationTokenSource.Token), tcs.Task).ConfigureAwait(false);
+                    if (completedTask != tcs.Task)
+                    {
+                        CancellationTokenSource.Token.ThrowIfCancellationRequested();
+                        return;
+                    }
+
+                    lock (Lock)
+                    {
+                        Debug.Assert(_pushbackDelay != null);
+
+                        // Use pushback value and delay again
+                        hedgingDelay = _pushbackDelay.GetValueOrDefault();
+
+                        _pushbackDelay = null;
+                        _pushbackReceivedTcs = new TaskCompletionSource<object?>(TaskCreationOptions.None);
+                    }
+                }
+                else
+                {
+                    await Task.Delay(hedgingDelay).ConfigureAwait(false);
                     return;
                 }
-
-                // Reached maximum allowed attempts.
-                // No more calls will be made so there is no point keeping the timer.
-                Log.StoppingHedgingCallTimer(Logger);
-                _createCallTimer?.Dispose();
-                _createCallTimer = null;
             }
         }
 
@@ -275,6 +359,12 @@ namespace Grpc.Net.Client.Internal.Retry
             lock (Lock)
             {
                 CleanUpUnsynchronized();
+
+                // Finalized call has been removed from active calls. Dispose it explicitly.
+                if (FinalizedCallTask.IsCompletedSuccessfully)
+                {
+                    FinalizedCallTask.Result.Dispose();
+                }
             }
         }
 
@@ -314,8 +404,6 @@ namespace Grpc.Net.Client.Internal.Retry
 
         private async Task WaitForCallAsync(Func<IList<IGrpcCall<TRequest, TResponse>>, Task> action)
         {
-            Console.WriteLine($"No activie calls. Wait for next call.");
-
             IGrpcCall<TRequest, TResponse>? call = null;
 
             // If there is a hedge delay then wait for next call.
@@ -328,6 +416,7 @@ namespace Grpc.Net.Client.Internal.Retry
             {
                 call = await FinalizedCallTask.ConfigureAwait(false);
             }
+
             await action(new[] { call }).ConfigureAwait(false);
         }
 

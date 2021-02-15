@@ -38,8 +38,6 @@ namespace Grpc.Net.Client.Internal.Retry
 
         private readonly Random _random;
 
-        private readonly CancellationTokenSource _retryCts;
-
         private int _attemptCount;
         private int _nextRetryDelayMilliseconds;
 
@@ -58,16 +56,6 @@ namespace Grpc.Net.Client.Internal.Retry
             ValidatePolicy(retryPolicy);
 
             _nextRetryDelayMilliseconds = Convert.ToInt32(retryPolicy.InitialBackoff.GetValueOrDefault().TotalMilliseconds);
-
-            _retryCts = new CancellationTokenSource();
-
-            // TODO(JamesNK) - Check that large deadlines are supported. Might need to use a Timer here instead.
-            var deadline = Options.Deadline.GetValueOrDefault(DateTime.MaxValue);
-            if (deadline != DateTime.MaxValue)
-            {
-                var timeout = CommonGrpcProtocolHelpers.GetTimerDueTime(deadline - Channel.Clock.UtcNow, Channel.MaxTimerDueTime);
-                _retryCts.CancelAfter(TimeSpan.FromMilliseconds(timeout));
-            }
         }
 
         private void ValidatePolicy(RetryPolicy retryPolicy)
@@ -235,12 +223,12 @@ namespace Grpc.Net.Client.Internal.Retry
                         }
 
                         Log.StartingRetryDelay(Logger, delayDuration);
-                        await Task.Delay(delayDuration, _retryCts.Token).ConfigureAwait(false);
+                        await Task.Delay(delayDuration, CancellationTokenSource.Token).ConfigureAwait(false);
 
                         _nextRetryDelayMilliseconds = CalculateNextRetryDelay();
 
                         // Check if dispose was called on call.
-                        _retryCts.Token.ThrowIfCancellationRequested();
+                        CancellationTokenSource.Token.ThrowIfCancellationRequested();
 
                         // Clean up the failed call.
                         currentCall.Dispose();
@@ -250,7 +238,7 @@ namespace Grpc.Net.Client.Internal.Retry
                         // Handle the situation where the call failed with a non-deadline status, but retry
                         // didn't happen because of deadline exceeded.
                         IGrpcCall<TRequest, TResponse> resolvedCall = (IsDeadlineExceeded() && !(currentCall.CallTask.IsCompletedSuccessfully && currentCall.CallTask.Result.StatusCode == StatusCode.DeadlineExceeded))
-                            ? DeadlineGrpcCall<TRequest, TResponse>.Instance
+                            ? DeadlineCall
                             : currentCall;
 
                         // Can't retry.
@@ -264,14 +252,14 @@ namespace Grpc.Net.Client.Internal.Retry
                     IGrpcCall<TRequest, TResponse> resolvedCall = currentCall;
 
                     // Cancellation token triggered by dispose could throw here.
-                    if (ex is OperationCanceledException && _retryCts.IsCancellationRequested)
+                    if (ex is OperationCanceledException && CancellationTokenSource.IsCancellationRequested)
                     {
                         // Cancellation could have been caused by an exceeded deadline.
                         if (IsDeadlineExceeded())
                         {
                             // An exceeded deadline inbetween calls means there is no active call.
                             // Create a fake call that returns exceeded deadline status to the app.
-                            resolvedCall = DeadlineGrpcCall<TRequest, TResponse>.Instance;
+                            resolvedCall = DeadlineCall;
                         }
                     }
                     else
@@ -300,7 +288,7 @@ namespace Grpc.Net.Client.Internal.Retry
         {
             lock (Lock)
             {
-                _retryCts.Cancel();
+                CancellationTokenSource.Cancel();
             }
         }
 

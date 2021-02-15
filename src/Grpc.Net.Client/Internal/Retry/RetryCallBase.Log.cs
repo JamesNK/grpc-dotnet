@@ -50,10 +50,10 @@ namespace Grpc.Net.Client.Internal.Retry
                 LoggerMessage.Define<CommitReason>(LogLevel.Debug, new EventId(7, "CallCommited"), "Call commited. Reason: {CommitReason}");
 
             private static readonly Action<ILogger, TimeSpan, Exception?> _startingHedgingCallTimer =
-                LoggerMessage.Define<TimeSpan>(LogLevel.Trace, new EventId(8, "StartingHedgingCallTimer"), "Starting heding call timer with delay {HedingDelay}.");
+                LoggerMessage.Define<TimeSpan>(LogLevel.Trace, new EventId(8, "StartingHedgingCallTimer"), "Starting hedging call timer with delay {HedingDelay}.");
 
             private static readonly Action<ILogger, Exception?> _stoppingHedgingCallTimer =
-                LoggerMessage.Define(LogLevel.Trace, new EventId(9, "StoppingHedgingCallTimer"), "Stopping heding call timer.");
+                LoggerMessage.Define(LogLevel.Trace, new EventId(9, "StoppingHedgingCallTimer"), "Stopping hedging call timer.");
 
             internal static void RetryEvaluated(ILogger logger, StatusCode statusCode, int attemptCount, RetryResult result)
             {
