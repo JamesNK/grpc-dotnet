@@ -131,69 +131,78 @@ namespace Grpc.Net.Client.Internal.Retry
 
         private async Task StartRetry(Action<GrpcCall<TRequest, TResponse>> startCallFunc)
         {
-            // This is the main retry loop. It will:
-            // 1. Check the result of the active call was successful.
-            // 2. If it was unsuccessful then evaluate if the call can be retried.
-            // 3. If it can be retried then start a new active call and begin again.
-            while (true)
+            Log.StartingRetryWorker(Logger);
+
+            try
             {
-                GrpcCall<TRequest, TResponse> currentCall;
-                lock (Lock)
+                // This is the main retry loop. It will:
+                // 1. Check the result of the active call was successful.
+                // 2. If it was unsuccessful then evaluate if the call can be retried.
+                // 3. If it can be retried then start a new active call and begin again.
+                while (true)
                 {
-                    // Start new call.
-                    currentCall = _activeCall = HttpClientCallInvoker.CreateGrpcCall<TRequest, TResponse>(Channel, Method, Options, _attemptCount);
-                    startCallFunc(currentCall);
-
-                    _attemptCount++;
-
-                    SetNewActiveCall(currentCall);
-                }
-
-                Status? responseStatus;
-
-                try
-                {
-                    currentCall.CancellationToken.ThrowIfCancellationRequested();
-
-                    Debug.Assert(currentCall._httpResponseTask != null, "Request should have be made if call is not preemptively cancelled.");
-                    var httpResponse = await currentCall._httpResponseTask.ConfigureAwait(false);
-
-                    responseStatus = GrpcCall.ValidateHeaders(httpResponse, out _);
-                }
-                catch (Exception ex)
-                {
-                    currentCall.ResolveException(GrpcCall<TRequest, TResponse>.ErrorStartingCallMessage, ex, out responseStatus, out _);
-                }
-
-                // Check to see the response returned from the server makes the call commited
-                // Null status code indicates the headers were valid and a "Response-Headers" response
-                // was received from the server.
-                // https://github.com/grpc/proposal/blob/master/A6-client-retries.md#when-retries-are-valid
-                if (responseStatus == null)
-                {
-                    // Headers were returned. We're commited.
-                    CommitCall(currentCall, CommitReason.ResponseHeadersReceived);
-
-                    responseStatus = await currentCall.CallTask.ConfigureAwait(false);
-                    if (responseStatus.GetValueOrDefault().StatusCode == StatusCode.OK)
+                    GrpcCall<TRequest, TResponse> currentCall;
+                    lock (Lock)
                     {
-                        // Success. Exit retry loop.
-                        Channel.RetryThrottling?.CallSuccess();
+                        // Start new call.
+                        currentCall = _activeCall = HttpClientCallInvoker.CreateGrpcCall<TRequest, TResponse>(Channel, Method, Options, _attemptCount);
+                        startCallFunc(currentCall);
+
+                        if (CommitedCallTask.IsCompletedSuccessfully)
+                        {
+                            // Call has already been commited. This could happen if written messages exceed
+                            // buffer limits, which causes the call to immediately become commited and to clear buffers.
+                            return;
+                        }
+
+                        _attemptCount++;
+
+                        SetNewActiveCall(currentCall);
                     }
-                    return;
-                }
 
-                if (FinalizedCallTask.IsCompletedSuccessfully)
-                {
-                    // Call has already been commited. This could happen if written messages exceed
-                    // buffer limits, which causes the call to immediately become commited and to clear buffers.
-                    return;
-                }
+                    Status? responseStatus;
 
-                Status status = responseStatus.Value;
+                    try
+                    {
+                        currentCall.CancellationToken.ThrowIfCancellationRequested();
 
-                try
-                {
+                        Debug.Assert(currentCall._httpResponseTask != null, "Request should have be made if call is not preemptively cancelled.");
+                        var httpResponse = await currentCall._httpResponseTask.ConfigureAwait(false);
+
+                        responseStatus = GrpcCall.ValidateHeaders(httpResponse, out _);
+                    }
+                    catch (Exception ex)
+                    {
+                        currentCall.ResolveException(GrpcCall<TRequest, TResponse>.ErrorStartingCallMessage, ex, out responseStatus, out _);
+                    }
+
+                    // Check to see the response returned from the server makes the call commited
+                    // Null status code indicates the headers were valid and a "Response-Headers" response
+                    // was received from the server.
+                    // https://github.com/grpc/proposal/blob/master/A6-client-retries.md#when-retries-are-valid
+                    if (responseStatus == null)
+                    {
+                        // Headers were returned. We're commited.
+                        CommitCall(currentCall, CommitReason.ResponseHeadersReceived);
+
+                        responseStatus = await currentCall.CallTask.ConfigureAwait(false);
+                        if (responseStatus.GetValueOrDefault().StatusCode == StatusCode.OK)
+                        {
+                            // Success. Exit retry loop.
+                            Channel.RetryThrottling?.CallSuccess();
+                        }
+                        return;
+                    }
+
+                    if (CommitedCallTask.IsCompletedSuccessfully)
+                    {
+                        // Call has already been commited. This could happen if written messages exceed
+                        // buffer limits, which causes the call to immediately become commited and to clear buffers.
+                        return;
+                    }
+
+                    Status status = responseStatus.Value;
+
                     var retryPushbackMS = GetRetryPushback(currentCall);
 
                     // Failures only could towards retry throttling if they have a known, retriable status.
@@ -245,11 +254,14 @@ namespace Grpc.Net.Client.Internal.Retry
                         return;
                     }
                 }
-                catch (Exception ex)
-                {
-                    HandleUnexpectedError(ex);
-                    return;
-                }
+            }
+            catch (Exception ex)
+            {
+                HandleUnexpectedError(ex);
+            }
+            finally
+            {
+                Log.StoppingRetryWorker(Logger);
             }
         }
 

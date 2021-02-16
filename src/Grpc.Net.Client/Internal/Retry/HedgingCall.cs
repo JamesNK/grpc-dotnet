@@ -94,7 +94,7 @@ namespace Grpc.Net.Client.Internal.Retry
             GrpcCall<TRequest, TResponse> call;
             lock (Lock)
             {
-                if (FinalizedCallTask.IsCompletedSuccessfully)
+                if (CommitedCallTask.IsCompletedSuccessfully)
                 {
                     // Call has already been commited. This could happen if written messages exceed
                     // buffer limits, which causes the call to immediately become commited and to clear buffers.
@@ -240,7 +240,7 @@ namespace Grpc.Net.Client.Internal.Retry
                     lock (Lock)
                     {
                         // Don't send additional calls if call has been commited.
-                        if (FinalizedCallTask.IsCompletedSuccessfully)
+                        if (CommitedCallTask.IsCompletedSuccessfully)
                         {
                             break;
                         }
@@ -255,12 +255,12 @@ namespace Grpc.Net.Client.Internal.Retry
 
         private async Task CreateHedgingCalls(Action<GrpcCall<TRequest, TResponse>> startCallFunc)
         {
-            var hedgingDelay = _hedgingPolicy.HedgingDelay.GetValueOrDefault();
-
-            Log.StartingHedgingCallTimer(Logger, hedgingDelay);
+            Log.StartingRetryWorker(Logger);
 
             try
             {
+                var hedgingDelay = _hedgingPolicy.HedgingDelay.GetValueOrDefault();
+
                 while (_callsAttempted < MaxRetryAttempts)
                 {
                     _ = StartCall(startCallFunc);
@@ -290,7 +290,7 @@ namespace Grpc.Net.Client.Internal.Retry
                             }
 
                             // Don't send additional calls if call has been commited.
-                            if (FinalizedCallTask.IsCompletedSuccessfully)
+                            if (CommitedCallTask.IsCompletedSuccessfully)
                             {
                                 break;
                             }
@@ -304,7 +304,7 @@ namespace Grpc.Net.Client.Internal.Retry
             }
             finally
             {
-                Log.StoppingHedgingCallTimer(Logger);
+                Log.StoppingRetryWorker(Logger);
             }
         }
 

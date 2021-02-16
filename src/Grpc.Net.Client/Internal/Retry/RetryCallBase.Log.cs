@@ -49,11 +49,11 @@ namespace Grpc.Net.Client.Internal.Retry
             private static readonly Action<ILogger, CommitReason, Exception?> _callCommited =
                 LoggerMessage.Define<CommitReason>(LogLevel.Debug, new EventId(7, "CallCommited"), "Call commited. Reason: {CommitReason}");
 
-            private static readonly Action<ILogger, TimeSpan, Exception?> _startingHedgingCallTimer =
-                LoggerMessage.Define<TimeSpan>(LogLevel.Trace, new EventId(8, "StartingHedgingCallTimer"), "Starting hedging call timer with delay {HedgingDelay}.");
+            private static readonly Action<ILogger, Exception?> _startingRetryWorker =
+                LoggerMessage.Define(LogLevel.Trace, new EventId(8, "StartingRetryWorker"), "Starting retry worker.");
 
-            private static readonly Action<ILogger, Exception?> _stoppingHedgingCallTimer =
-                LoggerMessage.Define(LogLevel.Trace, new EventId(9, "StoppingHedgingCallTimer"), "Stopping hedging call timer.");
+            private static readonly Action<ILogger, Exception?> _stoppingRetryWorker =
+                LoggerMessage.Define(LogLevel.Trace, new EventId(9, "StoppingRetryWorker"), "Stopping retry worker.");
 
             private static readonly Action<ILogger, int, int, Exception?> _maxAttemptsLimited =
                 LoggerMessage.Define<int, int>(LogLevel.Debug, new EventId(10, "MaxAttemptsLimited"), "The method has {ServiceConfigMaxAttempts} attempts specified in the service config. The number of attempts has been limited by channel configuration to {ChannelMaxAttempts}.");
@@ -96,14 +96,14 @@ namespace Grpc.Net.Client.Internal.Retry
                 _callCommited(logger, commitReason, null);
             }
 
-            internal static void StartingHedgingCallTimer(ILogger logger, TimeSpan hedgingDelay)
+            internal static void StartingRetryWorker(ILogger logger)
             {
-                _startingHedgingCallTimer(logger, hedgingDelay, null);
+                _startingRetryWorker(logger, null);
             }
 
-            internal static void StoppingHedgingCallTimer(ILogger logger)
+            internal static void StoppingRetryWorker(ILogger logger)
             {
-                _stoppingHedgingCallTimer(logger, null);
+                _stoppingRetryWorker(logger, null);
             }
 
             internal static void MaxAttemptsLimited(ILogger logger, int serviceConfigMaxAttempts, int channelMaxAttempts)

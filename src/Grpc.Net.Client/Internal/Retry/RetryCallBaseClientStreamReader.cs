@@ -33,13 +33,13 @@ namespace Grpc.Net.Client.Internal.Retry
             _retryCallBase = retryCallBase;
         }
 
-        public TResponse Current => _retryCallBase.FinalizedCallTask.IsCompletedSuccessfully
-                    ? _retryCallBase.FinalizedCallTask.Result.ClientStreamReader!.Current
+        public TResponse Current => _retryCallBase.CommitedCallTask.IsCompletedSuccessfully
+                    ? _retryCallBase.CommitedCallTask.Result.ClientStreamReader!.Current
                     : default!;
 
         public async Task<bool> MoveNext(CancellationToken cancellationToken)
         {
-            var call = await _retryCallBase.FinalizedCallTask.ConfigureAwait(false);
+            var call = await _retryCallBase.CommitedCallTask.ConfigureAwait(false);
             return await call.ClientStreamReader!.MoveNext(cancellationToken).ConfigureAwait(false);
         }
     }

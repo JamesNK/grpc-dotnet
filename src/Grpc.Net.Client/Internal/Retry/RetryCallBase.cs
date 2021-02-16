@@ -33,6 +33,7 @@ namespace Grpc.Net.Client.Internal.Retry
         where TRequest : class
         where TResponse : class
     {
+        private readonly TaskCompletionSource<IGrpcCall<TRequest, TResponse>> _commitedCallTcs;
         private RetryCallBaseClientStreamReader<TRequest, TResponse>? _retryBaseClientStreamReader;
         private RetryCallBaseClientStreamWriter<TRequest, TResponse>? _retryBaseClientStreamWriter;
         private CancellationTokenRegistration? _ctsRegistration;
@@ -43,12 +44,11 @@ namespace Grpc.Net.Client.Internal.Retry
         protected Method<TRequest, TResponse> Method { get; }
         protected CallOptions Options { get; }
         protected int MaxRetryAttempts { get; }
-        protected TaskCompletionSource<IGrpcCall<TRequest, TResponse>> FinalizedCallTcs { get; }
         protected CancellationTokenSource CancellationTokenSource { get; }
         protected TaskCompletionSource<IGrpcCall<TRequest, TResponse>?>? NewActiveCallTcs { get; set; }
         protected bool Disposed { get; private set; }
 
-        public Task<IGrpcCall<TRequest, TResponse>> FinalizedCallTask => FinalizedCallTcs.Task;
+        public Task<IGrpcCall<TRequest, TResponse>> CommitedCallTask => _commitedCallTcs.Task;
         public IAsyncStreamReader<TResponse>? ClientStreamReader => _retryBaseClientStreamReader ??= new RetryCallBaseClientStreamReader<TRequest, TResponse>(this);
         public IClientStreamWriter<TRequest>? ClientStreamWriter => _retryBaseClientStreamWriter ??= new RetryCallBaseClientStreamWriter<TRequest, TResponse>(this);
         public WriteOptions? ClientStreamWriteOptions { get; internal set; }
@@ -65,7 +65,7 @@ namespace Grpc.Net.Client.Internal.Retry
             Channel = channel;
             Method = method;
             Options = options;
-            FinalizedCallTcs = new TaskCompletionSource<IGrpcCall<TRequest, TResponse>>(TaskCreationOptions.RunContinuationsAsynchronously);
+            _commitedCallTcs = new TaskCompletionSource<IGrpcCall<TRequest, TResponse>>(TaskCreationOptions.RunContinuationsAsynchronously);
             BufferedMessages = new List<ReadOnlyMemory<byte>>();
 
             if (options.CancellationToken.CanBeCanceled)
@@ -101,21 +101,21 @@ namespace Grpc.Net.Client.Internal.Retry
 
         public async Task<TResponse> GetResponseAsync()
         {
-            var call = await FinalizedCallTcs.Task.ConfigureAwait(false);
+            var call = await CommitedCallTask.ConfigureAwait(false);
             return await call.GetResponseAsync().ConfigureAwait(false);
         }
 
         public async Task<Metadata> GetResponseHeadersAsync()
         {
-            var call = await FinalizedCallTcs.Task.ConfigureAwait(false);
+            var call = await CommitedCallTask.ConfigureAwait(false);
             return await call.GetResponseHeadersAsync().ConfigureAwait(false);
         }
 
         public Status GetStatus()
         {
-            if (FinalizedCallTcs.Task.IsCompletedSuccessfully)
+            if (CommitedCallTask.IsCompletedSuccessfully)
             {
-                return FinalizedCallTcs.Task.Result.GetStatus();
+                return CommitedCallTask.Result.GetStatus();
             }
 
             throw new InvalidOperationException("Unable to get the status because the call is not complete.");
@@ -123,9 +123,9 @@ namespace Grpc.Net.Client.Internal.Retry
 
         public Metadata GetTrailers()
         {
-            if (FinalizedCallTcs.Task.IsCompletedSuccessfully)
+            if (CommitedCallTask.IsCompletedSuccessfully)
             {
-                return FinalizedCallTcs.Task.Result.GetTrailers();
+                return CommitedCallTask.Result.GetTrailers();
             }
 
             throw new InvalidOperationException("Can't get the call trailers because the call has not completed successfully.");
@@ -276,7 +276,7 @@ namespace Grpc.Net.Client.Internal.Retry
                     messageData = SerializePayload(call, callOptions, message);
 
                     // Don't buffer message data if the call has been commited.
-                    if (!FinalizedCallTask.IsCompletedSuccessfully)
+                    if (!CommitedCallTask.IsCompletedSuccessfully)
                     {
                         if (!TryAddToRetryBuffer(messageData))
                         {
@@ -315,7 +315,7 @@ namespace Grpc.Net.Client.Internal.Retry
         {
             lock (Lock)
             {
-                if (!FinalizedCallTask.IsCompletedSuccessfully)
+                if (!CommitedCallTask.IsCompletedSuccessfully)
                 {
                     OnCommitCall(call);
 
@@ -323,7 +323,7 @@ namespace Grpc.Net.Client.Internal.Retry
                     Log.CallCommited(Logger, commitReason);
 
                     NewActiveCallTcs?.SetResult(null);
-                    FinalizedCallTcs.SetResult(call);
+                    _commitedCallTcs.SetResult(call);
 
                     ClearRetryBuffer();
                 }
@@ -339,7 +339,7 @@ namespace Grpc.Net.Client.Internal.Retry
 
         protected void SetNewActiveCall(IGrpcCall<TRequest, TResponse> call)
         {
-            Debug.Assert(!FinalizedCallTask.IsCompletedSuccessfully);
+            Debug.Assert(!CommitedCallTask.IsCompletedSuccessfully);
 
             if (NewActiveCallTcs != null)
             {
@@ -361,7 +361,7 @@ namespace Grpc.Net.Client.Internal.Retry
             var call = await NewActiveCallTcs.Task.ConfigureAwait(false);
             if (call == null)
             {
-                call = await FinalizedCallTask.ConfigureAwait(false);
+                call = await CommitedCallTask.ConfigureAwait(false);
             }
 
             // Avoid infinite loop.
@@ -387,9 +387,9 @@ namespace Grpc.Net.Client.Internal.Retry
                 _ctsRegistration?.Dispose();
                 CancellationTokenSource.Cancel();
 
-                if (FinalizedCallTask.IsCompletedSuccessfully)
+                if (CommitedCallTask.IsCompletedSuccessfully)
                 {
-                    FinalizedCallTask.Result.Dispose();
+                    CommitedCallTask.Result.Dispose();
                 }
 
                 ClearRetryBuffer();
