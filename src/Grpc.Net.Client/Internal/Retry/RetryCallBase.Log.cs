@@ -43,8 +43,8 @@ namespace Grpc.Net.Client.Internal.Retry
             private static readonly Action<ILogger, int, Exception?> _sendingBufferedMessages =
                 LoggerMessage.Define<int>(LogLevel.Trace, new EventId(5, "SendingBufferedMessages"), "Sending {MessageCount} buffered messages from previous failed gRPC calls.");
 
-            private static readonly Action<ILogger, int, Exception?> _messageAddedToBuffer =
-                LoggerMessage.Define<int>(LogLevel.Trace, new EventId(6, "MessageAddedToBuffer"), "Message with size {MessageSize} added to the buffer.");
+            private static readonly Action<ILogger, int, long, Exception?> _messageAddedToBuffer =
+                LoggerMessage.Define<int, long>(LogLevel.Trace, new EventId(6, "MessageAddedToBuffer"), "Message with {MessageSize} bytes added to the buffer. There are {CallBufferSize} bytes buffered for this call.");
 
             private static readonly Action<ILogger, CommitReason, Exception?> _callCommited =
                 LoggerMessage.Define<CommitReason>(LogLevel.Debug, new EventId(7, "CallCommited"), "Call commited. Reason: {CommitReason}");
@@ -83,9 +83,9 @@ namespace Grpc.Net.Client.Internal.Retry
                 _sendingBufferedMessages(logger, messageCount, null);
             }
 
-            internal static void MessageAddedToBuffer(ILogger logger, int messageSize)
+            internal static void MessageAddedToBuffer(ILogger logger, int messageSize, long callBufferSize)
             {
-                _messageAddedToBuffer(logger, messageSize, null);
+                _messageAddedToBuffer(logger, messageSize, callBufferSize, null);
             }
 
             internal static void CallCommited(ILogger logger, CommitReason commitReason)

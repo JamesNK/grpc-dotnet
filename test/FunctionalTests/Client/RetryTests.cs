@@ -39,7 +39,7 @@ namespace Grpc.AspNetCore.FunctionalTests.Client
         [Test]
         public async Task ClientStreaming_MultipleWritesAndRetries_Failure()
         {
-            int nextFailure = 1;
+            var nextFailure = 1;
 
             async Task<DataMessage> ClientStreamingWithReadFailures(IAsyncStreamReader<DataMessage> requestStream, ServerCallContext context)
             {
@@ -348,7 +348,7 @@ namespace Grpc.AspNetCore.FunctionalTests.Client
         [TestCase(0, false)]
         [TestCase(GrpcChannel.DefaultMaxRetryBufferPerCallSize - 10, false)] // Final message size is bigger because of header + Protobuf field
         [TestCase(GrpcChannel.DefaultMaxRetryBufferPerCallSize + 10, true)]
-        public async Task Unary_LargeMessages_ExceedPerCallBufferSize(int payloadSize, bool exceedBufferLimit)
+        public async Task Unary_LargeMessages_ExceedPerCallBufferSize(long payloadSize, bool exceedBufferLimit)
         {
             var callCount = 0;
             Task<DataMessage> UnaryFailure(DataMessage request, ServerCallContext context)
@@ -458,6 +458,105 @@ namespace Grpc.AspNetCore.FunctionalTests.Client
 
                 return call.ResponseAsync;
             }
+        }
+
+        [Test]
+        public async Task ClientStreaming_MultipleWritesExceedPerCallLimit_Failure()
+        {
+            var nextFailure = 2;
+            var callCount = 0;
+            var syncPoint = new SyncPoint(runContinuationsAsynchronously: true);
+
+            async Task<DataMessage> ClientStreamingWithReadFailures(IAsyncStreamReader<DataMessage> requestStream, ServerCallContext context)
+            {
+                Interlocked.Increment(ref callCount);
+
+                List<byte> bytes = new List<byte>();
+                await foreach (var message in requestStream.ReadAllAsync())
+                {
+                    bytes.Add(message.Data[0]);
+
+                    Logger.LogInformation($"Current count: {bytes.Count}, next failure: {nextFailure}.");
+
+                    if (bytes.Count >= nextFailure)
+                    {
+                        await syncPoint.WaitToContinue();
+                        throw new RpcException(new Status(StatusCode.Unavailable, ""));
+                    }
+                }
+
+                return new DataMessage
+                {
+                    Data = ByteString.CopyFrom(bytes.ToArray())
+                };
+            }
+
+            SetExpectedErrorsFilter(writeContext =>
+            {
+                return true;
+            });
+
+            // Arrange
+            var method = Fixture.DynamicGrpc.AddClientStreamingMethod<DataMessage, DataMessage>(ClientStreamingWithReadFailures);
+            var channel = CreateChannel(
+                serviceConfig: ServiceConfigHelpers.CreateRetryServiceConfig(maxAttempts: 10),
+                maxRetryAttempts: 10,
+                maxRetryBufferPerCallSize: 100);
+            var client = TestClientFactory.Create(channel, method);
+            var sentData = new List<byte>();
+
+            // Act
+            var call = client.ClientStreamingCall();
+
+            await call.RequestStream.WriteAsync(new DataMessage { Data = ByteString.CopyFrom(new byte[] { 1 }) }).DefaultTimeout();
+            await call.RequestStream.WriteAsync(new DataMessage { Data = ByteString.CopyFrom(new byte[] { 1 }) }).DefaultTimeout();
+
+            await syncPoint.WaitForSyncPoint();
+
+            await call.RequestStream.WriteAsync(new DataMessage { Data = ByteString.CopyFrom(new byte[] { 1 }) }).DefaultTimeout();
+
+            var s = syncPoint;
+            syncPoint = new SyncPoint(runContinuationsAsynchronously: true);
+            nextFailure = 15;
+            s.Continue();
+
+            await call.RequestStream.WriteAsync(new DataMessage { Data = ByteString.CopyFrom(new byte[] { 1 }) }).DefaultTimeout();
+            await call.RequestStream.WriteAsync(new DataMessage { Data = ByteString.CopyFrom(new byte[] { 1 }) }).DefaultTimeout();
+            await call.RequestStream.WriteAsync(new DataMessage { Data = ByteString.CopyFrom(new byte[] { 1 }) }).DefaultTimeout();
+            await call.RequestStream.WriteAsync(new DataMessage { Data = ByteString.CopyFrom(new byte[] { 1 }) }).DefaultTimeout();
+            await call.RequestStream.WriteAsync(new DataMessage { Data = ByteString.CopyFrom(new byte[] { 1 }) }).DefaultTimeout();
+            await call.RequestStream.WriteAsync(new DataMessage { Data = ByteString.CopyFrom(new byte[] { 1 }) }).DefaultTimeout();
+            await call.RequestStream.WriteAsync(new DataMessage { Data = ByteString.CopyFrom(new byte[] { 1 }) }).DefaultTimeout();
+            await call.RequestStream.WriteAsync(new DataMessage { Data = ByteString.CopyFrom(new byte[] { 1 }) }).DefaultTimeout();
+            await call.RequestStream.WriteAsync(new DataMessage { Data = ByteString.CopyFrom(new byte[] { 1 }) }).DefaultTimeout();
+
+            Assert.AreEqual(96, channel.CurrentRetryBufferSize);
+
+            await TestHelpers.AssertIsTrueRetryAsync(() => callCount == 2, "Wait for server to have second call.").DefaultTimeout();
+
+            // This message exceeds the buffer size. Call is commited here.
+            await call.RequestStream.WriteAsync(new DataMessage { Data = ByteString.CopyFrom(new byte[] { 1 }) }).DefaultTimeout();
+            Assert.AreEqual(0, channel.CurrentRetryBufferSize);
+
+            await call.RequestStream.WriteAsync(new DataMessage { Data = ByteString.CopyFrom(new byte[] { 1 }) }).DefaultTimeout();
+            await call.RequestStream.WriteAsync(new DataMessage { Data = ByteString.CopyFrom(new byte[] { 1 }) }).DefaultTimeout();
+
+            await syncPoint.WaitForSyncPoint();
+
+            await call.RequestStream.WriteAsync(new DataMessage { Data = ByteString.CopyFrom(new byte[] { 1 }) }).DefaultTimeout();
+
+            s = syncPoint;
+            syncPoint = new SyncPoint(runContinuationsAsynchronously: true);
+            nextFailure = int.MaxValue;
+            s.Continue();
+
+            // Assert
+            var ex = await ExceptionAssert.ThrowsAsync<RpcException>(() => call.ResponseAsync).DefaultTimeout();
+            Assert.AreEqual(StatusCode.Unavailable, ex.StatusCode);
+            Assert.AreEqual(StatusCode.Unavailable, call.GetStatus().StatusCode);
+
+            Assert.AreEqual(2, callCount);
+            Assert.AreEqual(0, channel.CurrentRetryBufferSize);
         }
     }
 }

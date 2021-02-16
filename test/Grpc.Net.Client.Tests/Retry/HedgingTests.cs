@@ -44,10 +44,14 @@ namespace Grpc.Net.Client.Tests.Retry
         public async Task AsyncUnaryCall_OneAttempt_Success(int maxAttempts)
         {
             // Arrange
+            var tcs = new TaskCompletionSource<object?>(TaskCreationOptions.RunContinuationsAsynchronously);
             var callCount = 0;
             var httpClient = ClientTestHelpers.CreateTestClient(async request =>
             {
                 Interlocked.Increment(ref callCount);
+
+                await tcs.Task;
+
                 await request.Content!.CopyToAsync(new MemoryStream());
 
                 var reply = new HelloReply { Message = "Hello world" };
@@ -65,6 +69,7 @@ namespace Grpc.Net.Client.Tests.Retry
 
             // Assert
             await TestHelpers.AssertIsTrueRetryAsync(() => callCount == maxAttempts, "All calls made at once.");
+            tcs.SetResult(null);
 
             var rs = await call.ResponseAsync.DefaultTimeout();
             Assert.AreEqual("Hello world", rs.Message);

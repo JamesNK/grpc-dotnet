@@ -56,7 +56,7 @@ namespace Grpc.Net.Client.Internal.Retry
         protected bool ClientStreamComplete { get; set; }
 
         protected List<ReadOnlyMemory<byte>> BufferedMessages { get; }
-        protected int CurrentCallBufferSize { get; set; }
+        protected long CurrentCallBufferSize { get; set; }
         protected bool BufferedCurrentMessage { get; set; }
 
         protected RetryCallBase(GrpcChannel channel, Method<TRequest, TResponse> method, CallOptions options, string loggerName, int retryAttempts)
@@ -274,15 +274,20 @@ namespace Grpc.Net.Client.Internal.Retry
                 if (!BufferedCurrentMessage)
                 {
                     messageData = SerializePayload(call, callOptions, message);
-                    if (!TryAddToRetryBuffer(messageData))
-                    {
-                        CommitCall(call, CommitReason.BufferExceeded);
-                    }
-                    else
-                    {
-                        BufferedCurrentMessage = true;
 
-                        Log.MessageAddedToBuffer(Logger, messageData.Length);
+                    // Don't buffer message data if the call has been commited.
+                    if (!FinalizedCallTask.IsCompletedSuccessfully)
+                    {
+                        if (!TryAddToRetryBuffer(messageData))
+                        {
+                            CommitCall(call, CommitReason.BufferExceeded);
+                        }
+                        else
+                        {
+                            BufferedCurrentMessage = true;
+
+                            Log.MessageAddedToBuffer(Logger, messageData.Length, CurrentCallBufferSize);
+                        }
                     }
                 }
                 else

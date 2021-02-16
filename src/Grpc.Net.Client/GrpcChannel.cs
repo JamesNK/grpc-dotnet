@@ -44,8 +44,8 @@ namespace Grpc.Net.Client
     {
         internal const int DefaultMaxReceiveMessageSize = 1024 * 1024 * 4; // 4 MB
         internal const int DefaultMaxRetryAttempts = 5;
-        internal const int DefaultMaxRetryBufferSize = 1024 * 1024 * 16; // 16 MB
-        internal const int DefaultMaxRetryBufferPerCallSize = 1024 * 1024; // 1 MB
+        internal const long DefaultMaxRetryBufferSize = 1024 * 1024 * 16; // 16 MB
+        internal const long DefaultMaxRetryBufferPerCallSize = 1024 * 1024; // 1 MB
 
         private readonly ConcurrentDictionary<IMethod, GrpcMethodInfo> _methodInfoCache;
         private readonly Func<IMethod, GrpcMethodInfo> _createMethodInfoFunc;
@@ -59,8 +59,8 @@ namespace Grpc.Net.Client
         internal int? SendMaxMessageSize { get; }
         internal int? ReceiveMaxMessageSize { get; }
         internal int? MaxRetryAttempts { get; }
-        internal int? MaxRetryBufferSize { get; }
-        internal int? MaxRetryBufferPerCallSize { get; }
+        internal long? MaxRetryBufferSize { get; }
+        internal long? MaxRetryBufferPerCallSize { get; }
         internal ILoggerFactory LoggerFactory { get; }
         internal bool ThrowOperationCanceledOnCancellation { get; }
         internal bool? IsSecure { get; }
@@ -72,7 +72,7 @@ namespace Grpc.Net.Client
 
         // Stateful
         internal ChannelRetryThrottling? RetryThrottling { get; }
-        internal int CurrentRetryBufferSize;
+        internal long CurrentRetryBufferSize;
 
         // Options that are set in unit tests
         internal ISystemClock Clock = SystemClock.Instance;
@@ -358,7 +358,7 @@ namespace Grpc.Net.Client
             Disposed = true;
         }
 
-        internal bool TryAddToRetryBuffer(int messageSize)
+        internal bool TryAddToRetryBuffer(long messageSize)
         {
             Debug.Assert(_retryBufferLock != null);
 
@@ -374,7 +374,7 @@ namespace Grpc.Net.Client
             }
         }
 
-        internal void RemoveFromRetryBuffer(int messageSize)
+        internal void RemoveFromRetryBuffer(long messageSize)
         {
             Debug.Assert(_retryBufferLock != null);
 

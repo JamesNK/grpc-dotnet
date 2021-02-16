@@ -90,7 +90,7 @@ namespace Grpc.Net.Client
         /// A <c>null</c> value removes the maximum retry buffer size limit. Defaults to 16,777,216 (16 MB).
         /// </para>
         /// </summary>
-        public int? MaxRetryBufferSize { get; set; }
+        public long? MaxRetryBufferSize { get; set; }
 
         /// <summary>
         /// Gets or sets the maximum buffer size in bytes that can be used to store sent messages when retrying
@@ -104,7 +104,7 @@ namespace Grpc.Net.Client
         /// A <c>null</c> value removes the maximum retry buffer size limit per call. Defaults to 1,048,576 (1 MB).
         /// </para>
         /// </summary>
-        public int? MaxRetryBufferPerCallSize { get; set; }
+        public long? MaxRetryBufferPerCallSize { get; set; }
 
         /// <summary>
         /// Gets or sets a collection of compression providers.

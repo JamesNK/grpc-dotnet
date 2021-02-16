@@ -183,6 +183,13 @@ namespace Grpc.Net.Client.Internal.Retry
                     return;
                 }
 
+                if (FinalizedCallTask.IsCompletedSuccessfully)
+                {
+                    // Call has already been commited. This could happen if written messages exceed
+                    // buffer limits, which causes the call to immediately become commited and to clear buffers.
+                    return;
+                }
+
                 Status status = responseStatus.Value;
 
                 try

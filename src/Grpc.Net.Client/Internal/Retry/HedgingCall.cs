@@ -94,6 +94,13 @@ namespace Grpc.Net.Client.Internal.Retry
             GrpcCall<TRequest, TResponse> call;
             lock (Lock)
             {
+                if (FinalizedCallTask.IsCompletedSuccessfully)
+                {
+                    // Call has already been commited. This could happen if written messages exceed
+                    // buffer limits, which causes the call to immediately become commited and to clear buffers.
+                    return;
+                }
+
                 call = HttpClientCallInvoker.CreateGrpcCall<TRequest, TResponse>(Channel, Method, Options, _callsAttempted);
                 _activeCalls.Add(call);
                 _callsAttempted++;
@@ -229,6 +236,15 @@ namespace Grpc.Net.Client.Internal.Retry
                         // TODO(JamesNK) - Log
                         break;
                     }
+
+                    lock (Lock)
+                    {
+                        // Don't send additional calls if call has been commited.
+                        if (FinalizedCallTask.IsCompletedSuccessfully)
+                        {
+                            break;
+                        }
+                    }
                 }
             }
             else
@@ -263,6 +279,12 @@ namespace Grpc.Net.Client.Internal.Retry
                             if (Channel.RetryThrottling?.IsRetryThrottlingActive() ?? false && _activeCalls.Count == 0)
                             {
                                 CommitCall(CreateStatusCall(GrpcProtocolConstants.ThrottledStatus), CommitReason.Throttled);
+                                break;
+                            }
+
+                            // Don't send additional calls if call has been commited.
+                            if (FinalizedCallTask.IsCompletedSuccessfully)
+                            {
                                 break;
                             }
                         }
