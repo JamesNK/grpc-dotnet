@@ -42,17 +42,25 @@ namespace Grpc.AspNetCore.FunctionalTests
 
         protected GrpcChannel Channel => _channel ??= CreateChannel();
 
-        protected GrpcChannel CreateChannel(bool useHandler = false, ServiceConfig? serviceConfig = null, int? maxRetryAttempts = null)
+        protected GrpcChannel CreateChannel(bool useHandler = false, ServiceConfig? serviceConfig = null, int? maxRetryAttempts = null, int? maxRetryBufferSize = null, int? maxRetryBufferPerCallSize = null)
         {
             var options = new GrpcChannelOptions
             {
                 LoggerFactory = LoggerFactory,
                 ServiceConfig = serviceConfig
             };
-            // Don't overwrite default MaxRetryAttempts
+            // Don't overwrite defaults
             if (maxRetryAttempts != null)
             {
                 options.MaxRetryAttempts = maxRetryAttempts;
+            }
+            if (maxRetryBufferSize != null)
+            {
+                options.MaxRetryBufferSize = maxRetryBufferSize;
+            }
+            if (maxRetryBufferPerCallSize != null)
+            {
+                options.MaxRetryBufferPerCallSize = maxRetryBufferPerCallSize;
             }
             if (useHandler)
             {

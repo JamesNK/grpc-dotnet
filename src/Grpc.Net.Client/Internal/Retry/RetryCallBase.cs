@@ -278,10 +278,12 @@ namespace Grpc.Net.Client.Internal.Retry
                     {
                         CommitCall(call, CommitReason.BufferExceeded);
                     }
+                    else
+                    {
+                        BufferedCurrentMessage = true;
 
-                    BufferedCurrentMessage = true;
-
-                    Log.MessageAddedToBuffer(Logger, messageData.Length);
+                        Log.MessageAddedToBuffer(Logger, messageData.Length);
+                    }
                 }
                 else
                 {
@@ -317,6 +319,8 @@ namespace Grpc.Net.Client.Internal.Retry
 
                     NewActiveCallTcs?.SetResult(null);
                     FinalizedCallTcs.SetResult(call);
+
+                    ClearRetryBuffer();
                 }
             }
         }
@@ -382,6 +386,8 @@ namespace Grpc.Net.Client.Internal.Retry
                 {
                     FinalizedCallTask.Result.Dispose();
                 }
+
+                ClearRetryBuffer();
             }
         }
 
@@ -405,12 +411,16 @@ namespace Grpc.Net.Client.Internal.Retry
             }
         }
 
-        internal void RemoveFromRetryBuffer(int messageSize)
+        internal void ClearRetryBuffer()
         {
             lock (Lock)
             {
-                CurrentCallBufferSize -= messageSize;
-                Channel.RemoveFromRetryBuffer(messageSize);
+                if (BufferedMessages.Count > 0)
+                {
+                    BufferedMessages.Clear();
+                    Channel.RemoveFromRetryBuffer(CurrentCallBufferSize);
+                    CurrentCallBufferSize = 0;
+                }
             }
         }
 

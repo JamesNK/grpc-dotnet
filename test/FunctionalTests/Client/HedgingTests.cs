@@ -26,6 +26,7 @@ using Google.Protobuf;
 using Google.Protobuf.WellKnownTypes;
 using Grpc.AspNetCore.FunctionalTests.Infrastructure;
 using Grpc.Core;
+using Grpc.Net.Client;
 using Grpc.Net.Client.Configuration;
 using Grpc.Tests.Shared;
 using Microsoft.Extensions.Logging;
@@ -435,6 +436,52 @@ namespace Grpc.AspNetCore.FunctionalTests.Client
 
             AssertHasLog(LogLevel.Debug, "MaxAttemptsLimited", "The method has 10 attempts specified in the service config. The number of attempts has been limited by channel configuration to 5.");
             AssertHasLog(LogLevel.Debug, "CallCommited", "Call commited. Reason: ExceededAttemptCount");
+        }
+
+        [TestCase(0, false, 0)]
+        [TestCase(0, false, 1)]
+        [TestCase(GrpcChannel.DefaultMaxRetryBufferPerCallSize - 10, false, 0)] // Final message size is bigger because of header + Protobuf field
+        [TestCase(GrpcChannel.DefaultMaxRetryBufferPerCallSize - 10, false, 1)] // Final message size is bigger because of header + Protobuf field
+        [TestCase(GrpcChannel.DefaultMaxRetryBufferPerCallSize + 10, true, 0)]
+        [TestCase(GrpcChannel.DefaultMaxRetryBufferPerCallSize + 10, true, 1)]
+        public async Task Unary_LargeMessages_ExceedPerCallBufferSize(int payloadSize, bool exceedBufferLimit, int hedgingDelayMilliseconds)
+        {
+            var callCount = 0;
+            Task<DataMessage> UnaryFailure(DataMessage request, ServerCallContext context)
+            {
+                Interlocked.Increment(ref callCount);
+                return Task.FromException<DataMessage>(new RpcException(new Status(StatusCode.Unavailable, "")));
+            }
+
+            // Arrange
+            var method = Fixture.DynamicGrpc.AddUnaryMethod<DataMessage, DataMessage>(UnaryFailure);
+
+            var channel = CreateChannel(serviceConfig: ServiceConfigHelpers.CreateHedgingServiceConfig(hedgingDelay: TimeSpan.FromMilliseconds(hedgingDelayMilliseconds)));
+
+            var client = TestClientFactory.Create(channel, method);
+
+            // Act
+            var call = client.UnaryCall(new DataMessage
+            {
+                Data = ByteString.CopyFrom(new byte[payloadSize])
+            });
+
+            // Assert
+            var ex = await ExceptionAssert.ThrowsAsync<RpcException>(() => call.ResponseAsync).DefaultTimeout();
+            Assert.AreEqual(StatusCode.Unavailable, ex.StatusCode);
+            Assert.AreEqual(StatusCode.Unavailable, call.GetStatus().StatusCode);
+
+            if (!exceedBufferLimit)
+            {
+                Assert.AreEqual(5, callCount);
+            }
+            else
+            {
+                Assert.AreEqual(1, callCount);
+                AssertHasLog(LogLevel.Debug, "CallCommited", "Call commited. Reason: BufferExceeded");
+            }
+
+            Assert.AreEqual(0, channel.CurrentRetryBufferSize);
         }
     }
 }

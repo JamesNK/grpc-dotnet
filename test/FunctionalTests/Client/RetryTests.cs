@@ -24,6 +24,7 @@ using System.Threading.Tasks;
 using Google.Protobuf;
 using Grpc.AspNetCore.FunctionalTests.Infrastructure;
 using Grpc.Core;
+using Grpc.Net.Client;
 using Grpc.Net.Client.Configuration;
 using Grpc.Tests.Shared;
 using Microsoft.Extensions.Logging;
@@ -342,6 +343,121 @@ namespace Grpc.AspNetCore.FunctionalTests.Client
 
             AssertHasLog(LogLevel.Debug, "MaxAttemptsLimited", "The method has 10 attempts specified in the service config. The number of attempts has been limited by channel configuration to 5.");
             AssertHasLog(LogLevel.Debug, "CallCommited", "Call commited. Reason: ExceededAttemptCount");
+        }
+
+        [TestCase(0, false)]
+        [TestCase(GrpcChannel.DefaultMaxRetryBufferPerCallSize - 10, false)] // Final message size is bigger because of header + Protobuf field
+        [TestCase(GrpcChannel.DefaultMaxRetryBufferPerCallSize + 10, true)]
+        public async Task Unary_LargeMessages_ExceedPerCallBufferSize(int payloadSize, bool exceedBufferLimit)
+        {
+            var callCount = 0;
+            Task<DataMessage> UnaryFailure(DataMessage request, ServerCallContext context)
+            {
+                Interlocked.Increment(ref callCount);
+                return Task.FromException<DataMessage>(new RpcException(new Status(StatusCode.Unavailable, "")));
+            }
+
+            // Arrange
+            var method = Fixture.DynamicGrpc.AddUnaryMethod<DataMessage, DataMessage>(UnaryFailure);
+
+            var channel = CreateChannel(serviceConfig: ServiceConfigHelpers.CreateRetryServiceConfig());
+
+            var client = TestClientFactory.Create(channel, method);
+
+            // Act
+            var call = client.UnaryCall(new DataMessage
+            {
+                Data = ByteString.CopyFrom(new byte[payloadSize])
+            });
+
+            // Assert
+            var ex = await ExceptionAssert.ThrowsAsync<RpcException>(() => call.ResponseAsync).DefaultTimeout();
+            Assert.AreEqual(StatusCode.Unavailable, ex.StatusCode);
+            Assert.AreEqual(StatusCode.Unavailable, call.GetStatus().StatusCode);
+
+            if (!exceedBufferLimit)
+            {
+                Assert.AreEqual(5, callCount);
+            }
+            else
+            {
+                Assert.AreEqual(1, callCount);
+                AssertHasLog(LogLevel.Debug, "CallCommited", "Call commited. Reason: BufferExceeded");
+            }
+
+            Assert.AreEqual(0, channel.CurrentRetryBufferSize);
+        }
+
+        [Test]
+        public async Task Unary_MultipleLargeMessages_ExceedChannelMaxBufferSize()
+        {
+            // Arrange
+            var sp1 = new SyncPoint(runContinuationsAsynchronously: true);
+            var sp2 = new SyncPoint(runContinuationsAsynchronously: true);
+            var sp3 = new SyncPoint(runContinuationsAsynchronously: true);
+            var channel = CreateChannel(
+                serviceConfig: ServiceConfigHelpers.CreateRetryServiceConfig(),
+                maxRetryBufferSize: 200,
+                maxRetryBufferPerCallSize: 100);
+
+            var request = new DataMessage { Data = ByteString.CopyFrom(new byte[90]) };
+
+            // Act
+            var call1Task = MakeCall(Fixture, channel, request, sp1);
+            await sp1.WaitForSyncPoint();
+
+            var call2Task = MakeCall(Fixture, channel, request, sp2);
+            await sp2.WaitForSyncPoint();
+
+            // Will exceed channel buffer limit and won't retry
+            var call3Task = MakeCall(Fixture, channel, request, sp3);
+            await sp3.WaitForSyncPoint();
+
+            // Assert
+            Assert.AreEqual(194, channel.CurrentRetryBufferSize);
+
+            sp1.Continue();
+            sp2.Continue();
+            sp3.Continue();
+
+            var response = await call1Task.DefaultTimeout();
+            Assert.AreEqual(90, response.Data.Length);
+
+            response = await call2Task.DefaultTimeout();
+            Assert.AreEqual(90, response.Data.Length);
+
+            // Can't retry because buffer size exceeded.
+            var ex = await ExceptionAssert.ThrowsAsync<RpcException>(() => call3Task).DefaultTimeout();
+            Assert.AreEqual(StatusCode.Unavailable, ex.StatusCode);
+
+            Assert.AreEqual(0, channel.CurrentRetryBufferSize);
+
+            static Task<DataMessage> MakeCall(GrpcTestFixture<FunctionalTestsWebsite.Startup> fixture, GrpcChannel channel, DataMessage request, SyncPoint syncPoint)
+            {
+                var callCount = 0;
+                async Task<DataMessage> UnaryFailure(DataMessage request, ServerCallContext context)
+                {
+                    Interlocked.Increment(ref callCount);
+                    if (callCount == 1)
+                    {
+                        await syncPoint.WaitToContinue();
+                        throw new RpcException(new Status(StatusCode.Unavailable, ""));
+                    }
+                    else
+                    {
+                        return request;
+                    }
+                }
+
+                // Arrange
+                var method = fixture.DynamicGrpc.AddUnaryMethod<DataMessage, DataMessage>(UnaryFailure);
+
+                var client = TestClientFactory.Create(channel, method);
+
+                var call = client.UnaryCall(request);
+
+                return call.ResponseAsync;
+            }
         }
     }
 }

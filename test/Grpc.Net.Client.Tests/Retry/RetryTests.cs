@@ -46,18 +46,21 @@ namespace Grpc.Net.Client.Tests.Retry
 
             bool? firstRequestPreviousAttemptsHeader = null;
             string? secondRequestPreviousAttemptsHeaderValue = null;
+            var requestContent = new MemoryStream();
 
             var callCount = 0;
             var httpClient = ClientTestHelpers.CreateTestClient(async request =>
             {
                 callCount++;
+
                 content = request.Content!;
+                await content.CopyToAsync(requestContent);
+                requestContent.Seek(0, SeekOrigin.Begin);
 
                 if (callCount == 1)
                 {
                     firstRequestPreviousAttemptsHeader = request.Headers.TryGetValues(GrpcProtocolConstants.RetryPreviousAttemptsHeader, out _);
 
-                    await content.CopyToAsync(new MemoryStream());
                     return ResponseUtils.CreateHeadersOnlyResponse(HttpStatusCode.OK, StatusCode.Unavailable);
                 }
 
@@ -87,7 +90,6 @@ namespace Grpc.Net.Client.Tests.Retry
 
             Assert.IsNotNull(content);
 
-            var requestContent = await content!.ReadAsStreamAsync().DefaultTimeout();
             var requestMessage = await ReadRequestMessage(requestContent).DefaultTimeout();
 
             Assert.AreEqual("World", requestMessage!.Name);
@@ -618,20 +620,22 @@ namespace Grpc.Net.Client.Tests.Retry
         public async Task AsyncServerStreamingCall_SuccessAfterRetry_RequestContentSent()
         {
             // Arrange
-            HttpContent? content = null;
             var syncPoint = new SyncPoint(runContinuationsAsynchronously: true);
+            var requestContent = new MemoryStream();
 
             var callCount = 0;
             var httpClient = ClientTestHelpers.CreateTestClient(async request =>
             {
                 callCount++;
-                content = request.Content!;
+
+                var content = request.Content!;
+                await content.CopyToAsync(requestContent);
+                requestContent.Seek(0, SeekOrigin.Begin);
 
                 if (callCount == 1)
                 {
                     await syncPoint.WaitForSyncPoint();
 
-                    await content.CopyToAsync(new MemoryStream());
                     return ResponseUtils.CreateHeadersOnlyResponse(HttpStatusCode.OK, StatusCode.Unavailable);
                 }
 
@@ -656,9 +660,6 @@ namespace Grpc.Net.Client.Tests.Retry
             Assert.IsTrue(await moveNextTask);
             Assert.AreEqual("Hello world", call.ResponseStream.Current.Message);
 
-            Assert.IsNotNull(content);
-
-            var requestContent = await content!.ReadAsStreamAsync().DefaultTimeout();
             var requestMessage = await ReadRequestMessage(requestContent).DefaultTimeout();
             Assert.AreEqual("World", requestMessage!.Name);
             requestMessage = await ReadRequestMessage(requestContent).DefaultTimeout();
