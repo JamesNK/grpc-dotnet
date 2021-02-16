@@ -58,6 +58,9 @@ namespace Grpc.Net.Client.Internal.Retry
             private static readonly Action<ILogger, int, int, Exception?> _maxAttemptsLimited =
                 LoggerMessage.Define<int, int>(LogLevel.Debug, new EventId(10, "MaxAttemptsLimited"), "The method has {ServiceConfigMaxAttempts} attempts specified in the service config. The number of attempts has been limited by channel configuration to {ChannelMaxAttempts}.");
 
+            private static readonly Action<ILogger, Exception?> _additionalCallsBlockedByRetryThrottling =
+                LoggerMessage.Define(LogLevel.Debug, new EventId(11, "AdditionalCallsBlockedByRetryThrottling"), "Additional calls blocked by retry throttling.");
+
             internal static void RetryEvaluated(ILogger logger, StatusCode statusCode, int attemptCount, bool willRetry)
             {
                 _retryEvaluated(logger, statusCode, attemptCount, willRetry, null);
@@ -106,6 +109,11 @@ namespace Grpc.Net.Client.Internal.Retry
             internal static void MaxAttemptsLimited(ILogger logger, int serviceConfigMaxAttempts, int channelMaxAttempts)
             {
                 _maxAttemptsLimited(logger, serviceConfigMaxAttempts, channelMaxAttempts, null);
+            }
+
+            internal static void AdditionalCallsBlockedByRetryThrottling(ILogger logger)
+            {
+                _additionalCallsBlockedByRetryThrottling(logger, null);
             }
         }
     }

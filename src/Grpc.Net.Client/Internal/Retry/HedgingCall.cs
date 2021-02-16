@@ -233,7 +233,7 @@ namespace Grpc.Net.Client.Internal.Retry
                     // Don't send additional calls if retry throttling is active.
                     if (Channel.RetryThrottling?.IsRetryThrottlingActive() ?? false)
                     {
-                        // TODO(JamesNK) - Log
+                        Log.AdditionalCallsBlockedByRetryThrottling(Logger);
                         break;
                     }
 
@@ -281,6 +281,10 @@ namespace Grpc.Net.Client.Internal.Retry
                                 if (_activeCalls.Count == 0)
                                 {
                                     CommitCall(CreateStatusCall(GrpcProtocolConstants.ThrottledStatus), CommitReason.Throttled);
+                                }
+                                else
+                                {
+                                    Log.AdditionalCallsBlockedByRetryThrottling(Logger);
                                 }
                                 break;
                             }

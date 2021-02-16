@@ -406,6 +406,55 @@ namespace Grpc.AspNetCore.FunctionalTests.Client
             AssertHasLog(LogLevel.Debug, "CallCommited", "Call commited. Reason: Throttled");
         }
 
+        [Test]
+        public async Task Unary_RetryThrottlingBecomesActive_HasDelay_Failure()
+        {
+            var callCount = 0;
+            var syncPoint = new SyncPoint(runContinuationsAsynchronously: true);
+            async Task<DataMessage> UnaryFailure(DataMessage request, ServerCallContext context)
+            {
+                Interlocked.Increment(ref callCount);
+                await syncPoint.WaitToContinue();
+                return request;
+            }
+
+            // Arrange
+            var method = Fixture.DynamicGrpc.AddUnaryMethod<DataMessage, DataMessage>(UnaryFailure);
+
+            var channel = CreateChannel(serviceConfig: ServiceConfigHelpers.CreateHedgingServiceConfig(
+                hedgingDelay: TimeSpan.FromMilliseconds(100),
+                retryThrottling: new RetryThrottlingPolicy
+                {
+                    MaxTokens = 5,
+                    TokenRatio = 0.1
+                }));
+
+            var client = TestClientFactory.Create(channel, method);
+
+            // Act
+            var call = client.UnaryCall(new DataMessage());
+
+            await syncPoint.WaitForSyncPoint().DefaultTimeout();
+
+            // Manually trigger retry throttling
+            Debug.Assert(channel.RetryThrottling != null);
+            channel.RetryThrottling.CallFailure();
+            channel.RetryThrottling.CallFailure();
+            channel.RetryThrottling.CallFailure();
+            Debug.Assert(channel.RetryThrottling.IsRetryThrottlingActive());
+
+            // Assert
+            await TestHelpers.AssertIsTrueRetryAsync(() => HasLog(LogLevel.Debug, "AdditionalCallsBlockedByRetryThrottling", "Additional calls blocked by retry throttling."), "Check for expected log.");
+
+            Assert.AreEqual(1, callCount);
+            syncPoint.Continue();
+
+            await call.ResponseAsync.DefaultTimeout();
+            Assert.AreEqual(StatusCode.OK, call.GetStatus().StatusCode);
+
+            AssertHasLog(LogLevel.Debug, "CallCommited", "Call commited. Reason: ResponseHeadersReceived");
+        }
+
         [TestCase(0)]
         [TestCase(20)]
         public async Task Unary_AttemptsGreaterThanDefaultClientLimit_LimitedAttemptsMade(int hedgingDelay)
