@@ -19,6 +19,7 @@
 using System;
 using System.Collections.Generic;
 using System.Net.Http;
+using Grpc.Net.Client.Configuration;
 using Grpc.Net.Client.Internal;
 using Microsoft.Extensions.Logging;
 
@@ -34,7 +35,7 @@ namespace Grpc.Net.Client.Tests.Infrastructure
             bool? disableClientDeadline = null,
             long? maxTimerPeriod = null,
             IOperatingSystem? operatingSystem = null,
-            IDictionary<string, object>? serviceConfig = null)
+            ServiceConfig? serviceConfig = null)
         {
             var channelOptions = new GrpcChannelOptions
             {

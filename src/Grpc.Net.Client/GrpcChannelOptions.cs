@@ -20,6 +20,7 @@ using System;
 using System.Collections.Generic;
 using System.Net.Http;
 using Grpc.Core;
+using Grpc.Net.Client.Configuration;
 using Grpc.Net.Compression;
 using Microsoft.Extensions.Logging;
 
@@ -172,8 +173,9 @@ namespace Grpc.Net.Client
         /// Gets or sets the service config for a gRPC channel. A service config allows service owners to publish parameters
         /// to be automatically used by all clients of their service. A service config can also be specified by a client
         /// using this property.
+        /// Note: experimental API that can change or be removed without any prior notice.
         /// </summary>
-        public IDictionary<string, object>? ServiceConfig { get; set; }
+        public ServiceConfig? ServiceConfig { get; set; }
 
         /// <summary>
         /// Initializes a new instance of the <see cref="GrpcChannelOptions"/> class.

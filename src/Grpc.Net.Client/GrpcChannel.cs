@@ -106,7 +106,7 @@ namespace Grpc.Net.Client
             _createMethodInfoFunc = CreateMethodInfo;
             ActiveCalls = new HashSet<IDisposable>();
             // TODO(JamesNK): Underlying service config data is not copied
-            ServiceConfig = channelOptions.ServiceConfig != null ? new GrpcServiceConfig(channelOptions.ServiceConfig) : null;
+            ServiceConfig = channelOptions.ServiceConfig;
             RetryThrottling = ServiceConfig?.RetryThrottling != null ? new ChannelRetryThrottling(ServiceConfig.RetryThrottling) : null;
             _serviceConfigMethods = (ServiceConfig != null) ? CreateServiceConfigMethods(ServiceConfig) : null;
             _retryBufferLock = (ServiceConfig != null) ? new object() : null;

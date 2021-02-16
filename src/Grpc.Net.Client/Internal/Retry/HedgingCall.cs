@@ -276,9 +276,12 @@ namespace Grpc.Net.Client.Internal.Retry
                     {
                         lock (Lock)
                         {
-                            if (Channel.RetryThrottling?.IsRetryThrottlingActive() ?? false && _activeCalls.Count == 0)
+                            if (Channel.RetryThrottling?.IsRetryThrottlingActive() ?? false)
                             {
-                                CommitCall(CreateStatusCall(GrpcProtocolConstants.ThrottledStatus), CommitReason.Throttled);
+                                if (_activeCalls.Count == 0)
+                                {
+                                    CommitCall(CreateStatusCall(GrpcProtocolConstants.ThrottledStatus), CommitReason.Throttled);
+                                }
                                 break;
                             }
 
