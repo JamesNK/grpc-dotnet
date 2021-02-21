@@ -32,14 +32,24 @@ namespace Client
 
         static async Task Main(string[] args)
         {
-            using var channel = GrpcChannel.ForAddress("http://localhost", new GrpcChannelOptions
+            var handler = CreateHttpHandler(SocketPath);
+            var channel = GrpcChannel.ForAddress("http://localhost", new GrpcChannelOptions
             {
-                HttpHandler = CreateHttpHandler(SocketPath)
+                HttpHandler = handler
             });
-            var client = new Greeter.GreeterClient(channel);
 
-            var reply = await client.SayHelloAsync(new HelloRequest { Name = "GreeterClient" });
-            Console.WriteLine("Greeting: " + reply.Message);
+            try
+            {    
+                var client = new Greeter.GreeterClient(channel);
+
+                var reply = await client.SayHelloAsync(new HelloRequest { Name = "GreeterClient" });
+                Console.WriteLine("Greeting: " + reply.Message);
+            }
+            finally
+            {
+                handler.Dispose();
+                channel.Dispose();
+            }
 
             Console.WriteLine("Shutting down");
             Console.WriteLine("Press any key to exit...");
