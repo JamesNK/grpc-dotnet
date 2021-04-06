@@ -73,9 +73,14 @@ namespace Grpc.Shared
 
         public static bool HasHttpHandlerType(HttpMessageHandler handler, string handlerTypeName)
         {
+            return GetHttpHandlerType(handler, handlerTypeName) != null;
+        }
+
+        public static HttpMessageHandler? GetHttpHandlerType(HttpMessageHandler handler, string handlerTypeName)
+        {
             if (handler?.GetType().FullName == handlerTypeName)
             {
-                return true;
+                return handler;
             }
 
             HttpMessageHandler? currentHandler = handler;
@@ -85,11 +90,11 @@ namespace Grpc.Shared
 
                 if (currentHandler?.GetType().FullName == handlerTypeName)
                 {
-                    return true;
+                    return currentHandler;
                 }
             }
 
-            return false;
+            return null;
         }
     }
 }

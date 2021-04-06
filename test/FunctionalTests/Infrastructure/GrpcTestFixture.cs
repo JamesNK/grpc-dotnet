@@ -17,10 +17,10 @@
 #endregion
 
 using System;
+using System.Collections.Generic;
+using System.IO;
 using System.Net.Http;
-using System.Security.Authentication;
-using Grpc.Net.Client;
-using Grpc.Net.Client.Web;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -31,7 +31,7 @@ namespace Grpc.AspNetCore.FunctionalTests.Infrastructure
     {
         private readonly InProcessTestServer _server;
 
-        public GrpcTestFixture(Action<IServiceCollection>? initialConfigureServices = null)
+        public GrpcTestFixture(Action<IServiceCollection>? initialConfigureServices = null, Action<KestrelServerOptions, IDictionary<TestServerEndpointName, string>>? configureKestrel = null)
         {
             LoggerFactory = new LoggerFactory();
 
@@ -41,11 +41,52 @@ namespace Grpc.AspNetCore.FunctionalTests.Infrastructure
                 services.AddSingleton<DynamicGrpcServiceRegistry>();
             };
 
-            _server = new InProcessTestServer<TStartup>(services =>
-            {
-                initialConfigureServices?.Invoke(services);
-                configureServices(services);
-            });
+            _server = new InProcessTestServer<TStartup>(
+                services =>
+                {
+                    initialConfigureServices?.Invoke(services);
+                    configureServices(services);
+                },
+                (options, urls) =>
+                {
+                    if (configureKestrel != null)
+                    {
+                        configureKestrel(options, urls);
+                        return;
+                    }
+
+                    urls[TestServerEndpointName.Http2] = "http://127.0.0.1:50050";
+                    options.ListenLocalhost(50050, listenOptions =>
+                    {
+                        listenOptions.Protocols = HttpProtocols.Http2;
+                    });
+
+                    urls[TestServerEndpointName.Http1] = "http://127.0.0.1:50040";
+                    options.ListenLocalhost(50040, listenOptions =>
+                    {
+                        listenOptions.Protocols = HttpProtocols.Http1;
+                    });
+
+                    urls[TestServerEndpointName.Http2WithTls] = "https://127.0.0.1:50030";
+                    options.ListenLocalhost(50030, listenOptions =>
+                    {
+                        listenOptions.Protocols = HttpProtocols.Http2;
+
+                        var basePath = Path.GetDirectoryName(typeof(InProcessTestServer).Assembly.Location);
+                        var certPath = Path.Combine(basePath!, "server1.pfx");
+                        listenOptions.UseHttps(certPath, "1111");
+                    });
+
+                    urls[TestServerEndpointName.Http1WithTls] = "https://127.0.0.1:50020";
+                    options.ListenLocalhost(50020, listenOptions =>
+                    {
+                        listenOptions.Protocols = HttpProtocols.Http1;
+
+                        var basePath = Path.GetDirectoryName(typeof(InProcessTestServer).Assembly.Location);
+                        var certPath = Path.Combine(basePath!, "server1.pfx");
+                        listenOptions.UseHttps(certPath, "1111");
+                    });
+                });
 
             _server.StartServer();
 

@@ -16,33 +16,63 @@
 
 #endregion
 
+#if NET5_0_OR_GREATER
+#pragma warning disable CS1591 // Missing XML comment for publicly visible type or member
+
 using System;
+using System.Collections;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.IO;
+using System.Linq;
+using System.Net;
 using System.Net.Http;
+using System.Net.Sockets;
+using System.Runtime.ExceptionServices;
+using System.Threading;
 using System.Threading.Tasks;
 using Grpc.Core;
-
-#pragma warning disable CS1591 // Missing XML comment for publicly visible type or member
+using Grpc.Net.Client.Balancer;
+using Grpc.Shared;
+using Microsoft.Extensions.Logging;
 
 namespace Grpc.Net.Client.Balancer
 {
-    public class SubConnection
+    public abstract class SubConnection
     {
-        public Task ConnectAsync()
-        {
-            return Task.CompletedTask;
-        }
+        public abstract ValueTask<Stream> GetStreamAsync(DnsEndPoint endPoint, CancellationToken cancellationToken);
+        public abstract DnsEndPoint? CurrentEndPoint { get; }
+        public abstract Task ConnectAsync(CancellationToken cancellationToken);
     }
 
     public class BalancerState
     {
-        public ConnectivityState ConnectivityState { get; set; }
-        public Picker? Picker { get; set; }
+        public BalancerState(ConnectivityState connectivityState, SubConnectionPicker picker)
+        {
+            ConnectivityState = connectivityState;
+            Picker = picker;
+        }
+
+        public ConnectivityState ConnectivityState { get; }
+        public SubConnectionPicker Picker { get; }
     }
 
     public class SubConnectionState
     {
         public ConnectivityState ConnectivityState { get; set; }
         public Exception? ConnectionError { get; set; }
+    }
+
+    public class ConnectionState
+    {
+        public ConnectionState(AddressResolverResult resolverState, GrpcAttributes options)
+        {
+            ResolverState = resolverState;
+            Options = options;
+        }
+
+        public AddressResolverResult ResolverState { get; set; }
+        public GrpcAttributes Options { get; set; }
     }
 
     public enum ConnectivityState
@@ -88,24 +118,7 @@ namespace Grpc.Net.Client.Balancer
         public Metadata? Trailers { get; set; }
     }
 
-    public class Picker
-    {
-        public PickResult Pick(PickContext context)
-        {
-            return new PickResult(new SubConnection(), c => { });
-        }
-    }
-
-    public class SubConnectionOptions
-    {
-        public string? Address { get; set; }
-    }
-
-    public abstract class ClientConnectionBase
-    {
-        public abstract SubConnection CreateSubConnection(SubConnectionOptions options);
-        public abstract void RemoveSubConnection(SubConnection subConnection);
-    }
 }
 
 #pragma warning restore CS1591 // Missing XML comment for publicly visible type or member
+#endif
