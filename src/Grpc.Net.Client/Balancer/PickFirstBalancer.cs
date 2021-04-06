@@ -21,6 +21,7 @@
 
 using System;
 using System.Threading;
+using Grpc.Net.Client.Balancer.Internal;
 using Microsoft.Extensions.Logging;
 
 namespace Grpc.Net.Client.Balancer
@@ -29,13 +30,11 @@ namespace Grpc.Net.Client.Balancer
     {
         private readonly ClientConnection _connection;
         private SubConnection? _subConnection;
-        private ConnectivityState _state;
         private ILogger _logger;
 
-        public PickFirstBalancer(ClientConnection connection, ConnectivityState state)
+        public PickFirstBalancer(ClientConnection connection)
         {
             _connection = connection;
-            _state = state;
             _logger = _connection.LoggerFactory.CreateLogger<PickFirstBalancer>();
         }
 
@@ -45,7 +44,7 @@ namespace Grpc.Net.Client.Balancer
 
         public override void ResolverError(Exception exception)
         {
-            switch (_state)
+            switch (_connection.State)
             {
                 case ConnectivityState.Idle:
                 case ConnectivityState.Connecting:
@@ -70,12 +69,10 @@ namespace Grpc.Net.Client.Balancer
                 }
                 catch (Exception ex)
                 {
-                    _state = ConnectivityState.TransientFailure;
                     _connection.UpdateState(new BalancerState(ConnectivityState.TransientFailure, new FailurePicker(ex)));
                     throw;
                 }
 
-                _state = ConnectivityState.Idle;
                 _connection.UpdateState(new BalancerState(ConnectivityState.Idle, new PickFirstPicker(_subConnection)));
             }
             else
@@ -96,11 +93,11 @@ namespace Grpc.Net.Client.Balancer
                 return;
             }
 
-            switch (_state)
+            switch (_connection.State)
             {
                 case ConnectivityState.Ready:
                 case ConnectivityState.Idle:
-                    _connection.UpdateState(new BalancerState(_state, new PickFirstPicker(_subConnection)));
+                    _connection.UpdateState(new BalancerState(_connection.State, new PickFirstPicker(_subConnection)));
                     break;
                 case ConnectivityState.Connecting:
                     _connection.UpdateState(new BalancerState(ConnectivityState.Connecting, new FailurePicker(new Exception())));

@@ -47,6 +47,8 @@ namespace Grpc.Net.Client.Balancer
         public IReadOnlyList<DnsEndPoint> Addresses => _addresses;
         public ILogger Logger => _connection.Logger;
 
+        public override ConnectivityState State => _state;
+
         public GrpcSubConnection(GrpcConnection connection, IReadOnlyList<DnsEndPoint> addresses)
         {
             _addresses = addresses.ToList();

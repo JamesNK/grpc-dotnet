@@ -45,9 +45,19 @@ namespace Grpc.Net.Client.Balancer
             Logger = loggerFactory.CreateLogger<GrpcConnection>();
         }
 
+        public void ConfigureBalancer(Func<GrpcConnection, LoadBalancer> configure)
+        {
+            _balancer = configure(this);
+        }
+
         public void Start()
         {
-            _balancer = new PickFirstBalancer(this, State);
+            // Default to PickFirstBalancer
+            if (_balancer == null)
+            {
+                _balancer = new PickFirstBalancer(this);
+            }
+
             _resolverSubscription = _resolver.Subscribe(new ResolverObserver(this));
         }
 

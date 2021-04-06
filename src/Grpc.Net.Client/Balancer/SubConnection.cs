@@ -40,6 +40,7 @@ namespace Grpc.Net.Client.Balancer
 {
     public abstract class SubConnection
     {
+        public abstract ConnectivityState State { get; }
         public abstract ValueTask<Stream> GetStreamAsync(DnsEndPoint endPoint, CancellationToken cancellationToken);
         public abstract DnsEndPoint? CurrentEndPoint { get; }
         public abstract Task ConnectAsync(CancellationToken cancellationToken);

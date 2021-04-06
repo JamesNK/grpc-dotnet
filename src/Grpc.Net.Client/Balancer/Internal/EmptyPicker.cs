@@ -21,20 +21,17 @@
 
 using System;
 
-namespace Grpc.Net.Client.Balancer
+namespace Grpc.Net.Client.Balancer.Internal
 {
-    public class FailurePicker : SubConnectionPicker
+    public class EmptyPicker : SubConnectionPicker
     {
-        private readonly Exception _exception;
-
-        public FailurePicker(Exception exception)
+        public EmptyPicker()
         {
-            _exception = exception;
         }
 
         public override PickResult Pick(PickContext context)
         {
-            throw new InvalidOperationException("Error picking connection.", _exception);
+            return new PickResult(null!, null!);
         }
     }
 

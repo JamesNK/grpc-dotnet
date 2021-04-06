@@ -52,7 +52,16 @@ namespace Grpc.Net.Client.Balancer
         {
             await Task.Yield();
 
-            var result = _picker!.Pick(new PickContext(request));
+            PickResult? result;
+            while (true)
+            {
+                result = _picker!.Pick(new PickContext(request));
+                if (result.SubConnection == null)
+                {
+
+                }
+            }
+
             if (result.SubConnection.CurrentEndPoint == null)
             {
                 await result.SubConnection.ConnectAsync(cancellationToken).ConfigureAwait(false);
