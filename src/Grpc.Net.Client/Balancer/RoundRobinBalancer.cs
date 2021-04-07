@@ -24,7 +24,9 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Net;
 using System.Threading;
+using System.Threading.Tasks;
 using Grpc.Net.Client.Balancer.Internal;
+using Grpc.Net.Client.Internal;
 using Microsoft.Extensions.Logging;
 
 namespace Grpc.Net.Client.Balancer
@@ -32,15 +34,19 @@ namespace Grpc.Net.Client.Balancer
     public class RoundRobinBalancer : LoadBalancer
     {
         private readonly ClientConnection _connection;
+        private readonly IRandomGenerator _randomGenerator;
         private readonly List<(DnsEndPoint Address, SubConnection SubConnection)> _subConnections;
-        private readonly Random _random;
         private ILogger _logger;
 
-        public RoundRobinBalancer(ClientConnection connection)
+        public RoundRobinBalancer(ClientConnection connection) : this(connection, new RandomGenerator())
+        {
+        }
+
+        internal RoundRobinBalancer(ClientConnection connection, IRandomGenerator randomGenerator)
         {
             _subConnections = new List<(DnsEndPoint Address, SubConnection SubConnection)>();
             _connection = connection;
-            _random = new Random();
+            _randomGenerator = randomGenerator;
             _logger = _connection.LoggerFactory.CreateLogger<PickFirstBalancer>();
         }
 
@@ -131,7 +137,7 @@ namespace Grpc.Net.Client.Balancer
             // Start new connections after collection on balancer has been updated.
             foreach (var c in newSubConnections)
             {
-                _ = c.ConnectAsync(CancellationToken.None);
+                _ = Task.Run(() => c.ConnectAsync(CancellationToken.None));
             }
 
             UpdateBalancingState();
@@ -161,7 +167,7 @@ namespace Grpc.Net.Client.Balancer
 
                 if (isConnecting)
                 {
-                    _connection.UpdateState(new BalancerState(ConnectivityState.Connecting, new EmptyPicker()));
+                    _connection.UpdateState(new BalancerState(ConnectivityState.Connecting, EmptyPicker.Instance));
                 }
                 else
                 {
@@ -172,7 +178,7 @@ namespace Grpc.Net.Client.Balancer
             {
                 // Initialize the Picker to a random start index to ensure that a high frequency of Picker
                 // churn does not skew subchannel selection.
-                int pickCount = _random.Next(0, readySubConnections.Count);
+                int pickCount = _randomGenerator.Next(0, readySubConnections.Count);
                 _connection.UpdateState(new BalancerState(ConnectivityState.Ready, new RoundRobinPicker(readySubConnections, pickCount)));
             }
         }
@@ -196,24 +202,30 @@ namespace Grpc.Net.Client.Balancer
             UpdateBalancingState();
         }
 
-        private class RoundRobinPicker : SubConnectionPicker
+        protected override void Dispose(bool disposing)
         {
-            private readonly List<(DnsEndPoint Address, SubConnection SubConnection)> _subConnections;
-            private long _pickCount;
+            base.Dispose(disposing);
+        }
+    }
 
-            public RoundRobinPicker(List<(DnsEndPoint Address, SubConnection SubConnection)> subConnections, long pickCount)
-            {
-                _subConnections = subConnections;
-                _pickCount = pickCount;
-            }
+    internal class RoundRobinPicker : SubConnectionPicker
+    {
+        // Internal for testing
+        internal readonly List<(DnsEndPoint Address, SubConnection SubConnection)> _subConnections;
+        private long _pickCount;
 
-            public override PickResult Pick(PickContext context)
-            {
-                var c = Interlocked.Increment(ref _pickCount);
-                var index = c % _subConnections.Count;
+        public RoundRobinPicker(List<(DnsEndPoint Address, SubConnection SubConnection)> subConnections, long pickCount)
+        {
+            _subConnections = subConnections;
+            _pickCount = pickCount;
+        }
 
-                return new PickResult(_subConnections[(int)index].SubConnection, c => { });
-            }
+        public override PickResult Pick(PickContext context)
+        {
+            var c = Interlocked.Increment(ref _pickCount);
+            var index = (c - 1) % _subConnections.Count;
+
+            return new PickResult(_subConnections[(int)index].SubConnection, c => { });
         }
     }
 

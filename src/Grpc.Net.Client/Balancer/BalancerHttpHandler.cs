@@ -31,6 +31,7 @@ namespace Grpc.Net.Client.Balancer
     internal class BalancerHttpHandler : DelegatingHandler
     {
         private readonly ClientConnection _clientConnection;
+        private static readonly HttpRequestOptionsKey<SubConnection> _requestOptionsSubConnectionKey = new HttpRequestOptionsKey<SubConnection>(nameof(SubConnection));
 
         public BalancerHttpHandler(HttpMessageHandler innerHandler, ClientConnection clientConnection)
             : base(innerHandler)
@@ -48,19 +49,29 @@ namespace Grpc.Net.Client.Balancer
 
         private async ValueTask<Stream> OnConnect(SocketsHttpConnectionContext context, CancellationToken cancellationToken)
         {
-            var result = await _clientConnection.PickAsync(context.InitialRequestMessage, cancellationToken).ConfigureAwait(false);
-            return await result.SubConnection.GetStreamAsync(context.DnsEndPoint, cancellationToken).ConfigureAwait(false);
+            if (!context.InitialRequestMessage.Options.TryGetValue(_requestOptionsSubConnectionKey, out var subConnection))
+            {
+                throw new InvalidOperationException();
+            }
+
+            return await subConnection.GetStreamAsync(context.DnsEndPoint, cancellationToken).ConfigureAwait(false);
         }
 
         protected override async Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request, CancellationToken cancellationToken)
         {
+            await _clientConnection.ConnectAsync(cancellationToken).ConfigureAwait(false);
             var result = await _clientConnection.PickAsync(request, cancellationToken).ConfigureAwait(false);
 
+            // Update request host.
             var uriBuilder = new UriBuilder(request.RequestUri!);
-            uriBuilder.Host = result.SubConnection.CurrentEndPoint!.Host;
-            uriBuilder.Port = result.SubConnection.CurrentEndPoint!.Port;
+            uriBuilder.Host = result.SubConnection!.CurrentEndPoint!.Host;
+            uriBuilder.Port = result.SubConnection!.CurrentEndPoint!.Port;
             request.RequestUri = uriBuilder.Uri;
+
+            // Set sub-connection onto request.
+            // Will be used to get a stream in SocketsHttpHandler.ConnectCallback.
+            request.Options.Set(_requestOptionsSubConnectionKey, result.SubConnection);
 
             return await base.SendAsync(request, cancellationToken).ConfigureAwait(false);
         }

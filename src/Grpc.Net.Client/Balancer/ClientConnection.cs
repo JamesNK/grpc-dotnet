@@ -20,6 +20,7 @@
 #pragma warning disable CS1591 // Missing XML comment for publicly visible type or member
 
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Net;
 using System.Net.Http;
 using System.Net.Sockets;
@@ -32,42 +33,135 @@ namespace Grpc.Net.Client.Balancer
     public abstract class ClientConnection
     {
         private ConnectivityState _state;
-        private SubConnectionPicker? _picker;
+
+        // Internal for testing
+        internal SubConnectionPicker? _picker;
+        private TaskCompletionSource<SubConnectionPicker> _nextPickerTcs;
+        private readonly SemaphoreSlim _nextPickerLock;
+        private readonly object _lock;
+
+        protected ClientConnection(ILoggerFactory loggerFactory)
+        {
+            _lock = new object();
+            _nextPickerLock = new SemaphoreSlim(1);
+            _nextPickerTcs = new TaskCompletionSource<SubConnectionPicker>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            LoggerFactory = loggerFactory;
+            Logger = loggerFactory.CreateLogger(GetType());
+        }
 
         public ConnectivityState State => _state;
 
-        public abstract ILoggerFactory LoggerFactory { get; }
+        public ILogger Logger { get; }
+        public ILoggerFactory LoggerFactory { get; }
         public abstract SubConnection CreateSubConnection(SubConnectionOptions options);
         public abstract void RemoveSubConnection(SubConnection subConnection);
         public abstract void UpdateAddresses(SubConnection subConnection, IReadOnlyList<DnsEndPoint> addresses);
-        public abstract Task ResolveNowAsync();
+        public abstract Task ResolveNowAsync(CancellationToken cancellationToken);
+        public abstract Task ConnectAsync(CancellationToken cancellationToken);
 
         public virtual void UpdateState(BalancerState state)
         {
-            _state = state.ConnectivityState;
-            _picker = state.Picker;
+            lock (_lock)
+            {
+                if (_state != state.ConnectivityState)
+                {
+                    Logger.LogInformation("Connection state updated: " + state.ConnectivityState);
+                    _state = state.ConnectivityState;
+                }
+
+                if (!Equals(_picker, state.Picker))
+                {
+                    Logger.LogInformation("Updating picker");
+                    _picker = state.Picker;
+                    _nextPickerTcs.TrySetResult(state.Picker);
+                }
+            }
         }
 
         public async ValueTask<PickResult> PickAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
-            await Task.Yield();
+            var context = new PickContext(request);
+            SubConnectionPicker? previousPicker = null;
 
-            PickResult? result;
+            PickResult result;
             while (true)
             {
-                result = _picker!.Pick(new PickContext(request));
-                if (result.SubConnection == null)
-                {
+                var currentPicker = await GetPickerAsync(previousPicker, cancellationToken).ConfigureAwait(false);
 
+                result = currentPicker.Pick(context);
+
+                if (result.SubConnection != null)
+                {
+                    break;
+                }
+                else
+                {
+                    Logger.LogInformation("Current picker doesn't have a ready connection");
+                    previousPicker = currentPicker;
                 }
             }
 
+            Logger.LogInformation("Successfully picked sub-connection: " + result.SubConnection);
+
             if (result.SubConnection.CurrentEndPoint == null)
             {
-                await result.SubConnection.ConnectAsync(cancellationToken).ConfigureAwait(false);
+                try
+                {
+                    Logger.LogInformation("HACK: Connecting in picker!?");
+
+                    await result.SubConnection.ConnectAsync(cancellationToken).ConfigureAwait(false);
+                }
+                catch
+                {
+                    Debugger.Launch();
+
+                    throw;
+                }
             }
 
             return result;
+        }
+
+        private ValueTask<SubConnectionPicker> GetPickerAsync(SubConnectionPicker? currentPicker, CancellationToken cancellationToken)
+        {
+            lock (_lock)
+            {
+                if (_picker != null && _picker != currentPicker)
+                {
+                    return ValueTask.FromResult(_picker);
+                }
+                else
+                {
+                    return GetNextPickerAsync(cancellationToken);
+                }
+            }
+        }
+
+        private async ValueTask<SubConnectionPicker> GetNextPickerAsync(CancellationToken cancellationToken)
+        {
+            Logger.LogInformation("Waiting for valid picker");
+
+            Debug.Assert(Monitor.IsEntered(_lock));
+
+            var nextPickerTcs = _nextPickerTcs;
+
+            await _nextPickerLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                var nextPicker = await nextPickerTcs.Task.ConfigureAwait(false);
+
+                lock (_lock)
+                {
+                    _nextPickerTcs = new TaskCompletionSource<SubConnectionPicker>(TaskCreationOptions.RunContinuationsAsynchronously);
+                }
+
+                return nextPicker;
+            }
+            finally
+            {
+                _nextPickerLock.Release();
+            }
         }
     }
 

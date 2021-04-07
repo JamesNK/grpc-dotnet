@@ -16,30 +16,29 @@
 
 #endregion
 
-#if NET5_0_OR_GREATER
-#pragma warning disable CS1591 // Missing XML comment for publicly visible type or member
-
 using System;
 
-namespace Grpc.Net.Client.Balancer.Internal
+namespace Grpc.Net.Client.Internal
 {
-    public class EmptyPicker : SubConnectionPicker
+    internal interface IRandomGenerator
     {
-        public static readonly EmptyPicker Instance = new EmptyPicker();
+        int Next(int minValue, int maxValue);
+    }
 
-        private readonly PickResult _pickResult;
+    internal sealed class RandomGenerator : IRandomGenerator
+    {
+        private readonly Random _random;
 
-        private EmptyPicker()
+        public RandomGenerator()
         {
-            _pickResult = new PickResult(null, null);
+            // Can't use a singleton instance of RandomGenerator.
+            // Random isn't threadsafe and Random.Shared requires .NET 6+.
+            _random = new Random();
         }
 
-        public override PickResult Pick(PickContext context)
+        public int Next(int minValue, int maxValue)
         {
-            return _pickResult;
+            return _random.Next(minValue, maxValue);
         }
     }
 }
-
-#pragma warning restore CS1591 // Missing XML comment for publicly visible type or member
-#endif

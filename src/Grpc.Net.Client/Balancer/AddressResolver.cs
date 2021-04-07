@@ -20,6 +20,7 @@ using System;
 using System.Collections.Generic;
 using System.Net;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 
 #if NET5_0_OR_GREATER
@@ -31,7 +32,7 @@ namespace Grpc.Net.Client.Balancer
     {
         public abstract IDisposable Subscribe(IObserver<AddressResolverResult> observer);
         public abstract void Shutdown();
-        public abstract Task RefreshAsync();
+        public abstract Task RefreshAsync(CancellationToken cancellationToken);
     }
 
     public class AddressResolverResult

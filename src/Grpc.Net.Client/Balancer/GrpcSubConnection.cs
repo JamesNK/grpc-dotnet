@@ -22,6 +22,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Linq;
 using System.Net;
@@ -39,9 +40,11 @@ namespace Grpc.Net.Client.Balancer
         private readonly GrpcConnection _connection;
         private readonly SemaphoreSlim _connectionCreateLock;
         private readonly List<(Socket Socket, Stream? Stream)> _activeTransports;
+        private readonly object _lock;
 
         private DnsEndPoint? _currentEndPoint;
         private ConnectivityState _state;
+        private Task? _connectTask;
 
         public override DnsEndPoint? CurrentEndPoint => _currentEndPoint;
         public IReadOnlyList<DnsEndPoint> Addresses => _addresses;
@@ -51,6 +54,7 @@ namespace Grpc.Net.Client.Balancer
 
         public GrpcSubConnection(GrpcConnection connection, IReadOnlyList<DnsEndPoint> addresses)
         {
+            _lock = new object();
             _addresses = addresses.ToList();
             _connection = connection;
             _connectionCreateLock = new SemaphoreSlim(1);
@@ -68,8 +72,27 @@ namespace Grpc.Net.Client.Balancer
             }
         }
 
-        public override async Task ConnectAsync(CancellationToken cancellationToken)
+        public override Task ConnectAsync(CancellationToken cancellationToken)
         {
+            lock (_lock)
+            {
+                if (!IsConnectInProgressUnsynchronized)
+                {
+                    _connectTask = ConnectCoreAsync(cancellationToken);
+                }
+                else
+                {
+                    Logger.LogInformation("Connect already in progress " + this);
+                }
+
+                return _connectTask;
+            }
+        }
+
+        private async Task ConnectCoreAsync(CancellationToken cancellationToken)
+        {
+            Debug.Assert(Monitor.IsEntered(_lock));
+
             if (_state == ConnectivityState.Shutdown)
             {
                 throw new InvalidOperationException("Sub-connection has been shutdown.");
@@ -82,7 +105,19 @@ namespace Grpc.Net.Client.Balancer
 
             UpdateConnectivityState(ConnectivityState.Connecting);
 
-            await ResetTransportAsync().ConfigureAwait(false);
+            await ResetTransportAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        [MemberNotNullWhen(true, nameof(_connectTask))]
+        private bool IsConnectInProgressUnsynchronized
+        {
+            get
+            {
+                Debug.Assert(Monitor.IsEntered(_lock));
+
+                var connectTask = _connectTask;
+                return connectTask != null && !connectTask.IsCompleted;
+            }
         }
 
         private void UpdateConnectivityState(ConnectivityState state)
@@ -95,13 +130,13 @@ namespace Grpc.Net.Client.Balancer
             _connection.OnSubConnectionStateChange(this, _state);
         }
 
-        private async Task ResetTransportAsync()
+        private async Task ResetTransportAsync(CancellationToken cancellationToken)
         {
             for (var attempt = 0; ; attempt++)
             {
                 if (attempt > 0)
                 {
-                    await _connection.ResolveNowAsync().ConfigureAwait(false);
+                    await _connection.ResolveNowAsync(cancellationToken).ConfigureAwait(false);
                 }
 
                 if (_state == ConnectivityState.Shutdown)
@@ -111,7 +146,7 @@ namespace Grpc.Net.Client.Balancer
 
                 UpdateConnectivityState(ConnectivityState.Connecting);
 
-                _currentEndPoint = await TryConnectAsync(CancellationToken.None).ConfigureAwait(false);
+                _currentEndPoint = await TryConnectAsync(cancellationToken).ConfigureAwait(false);
                 if (_currentEndPoint != null)
                 {
                     return;
@@ -173,10 +208,10 @@ namespace Grpc.Net.Client.Balancer
         {
             Logger.LogInformation("GetStreamAsync: " + CurrentEndPoint);
 
-            if (!Equals(endPoint, CurrentEndPoint))
-            {
-                throw new InvalidOperationException();
-            }
+            //if (!Equals(endPoint, CurrentEndPoint))
+            //{
+            //    throw new InvalidOperationException();
+            //}
 
             if (_activeTransports.Count == 1 && _activeTransports[0].Stream == null)
             {
@@ -223,8 +258,12 @@ namespace Grpc.Net.Client.Balancer
                 }
             }
         }
-    }
 
+        public override string ToString()
+        {
+            return string.Join(", ", _addresses);
+        }
+    }
 }
 
 #pragma warning restore CS1591 // Missing XML comment for publicly visible type or member

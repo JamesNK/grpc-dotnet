@@ -69,7 +69,6 @@ namespace Grpc.Net.Client.Tests.Balancer
             var url1 = server1.GetUrl(TestServerEndpointName.Http2);
 
             var grpcConnection = new GrpcConnection(new StaticAddressResolver(new[] { new DnsEndPoint(url1.Host, url1.Port) }), LoggerFactory);
-            grpcConnection.Start();
 
             var channel = GrpcChannel.ForAddress(url1, new GrpcChannelOptions
             {
@@ -121,7 +120,6 @@ namespace Grpc.Net.Client.Tests.Balancer
             var url2 = server2.GetUrl(TestServerEndpointName.Http2);
 
             var grpcConnection = new GrpcConnection(new StaticAddressResolver(new[] { new DnsEndPoint(url1.Host, url1.Port), new DnsEndPoint(url2.Host, url2.Port) }), LoggerFactory);
-            grpcConnection.Start();
 
             var channel = GrpcChannel.ForAddress(url1, new GrpcChannelOptions
             {

@@ -35,6 +35,7 @@ using Grpc.AspNetCore.FunctionalTests.Client;
 using Grpc.AspNetCore.FunctionalTests.Infrastructure;
 using Grpc.Core;
 using Grpc.Net.Client.Balancer;
+using Grpc.Net.Client.Internal;
 using Grpc.Shared;
 using Grpc.Tests.Shared;
 using Microsoft.AspNetCore.Http;
@@ -70,7 +71,6 @@ namespace Grpc.Net.Client.Tests.Balancer
 
             var grpcConnection = new GrpcConnection(new StaticAddressResolver(new[] { new DnsEndPoint(url1.Host, url1.Port) }), LoggerFactory);
             grpcConnection.ConfigureBalancer(c => new RoundRobinBalancer(c));
-            grpcConnection.Start();
 
             var channel = GrpcChannel.ForAddress(url1, new GrpcChannelOptions
             {
@@ -80,8 +80,10 @@ namespace Grpc.Net.Client.Tests.Balancer
 
             var client = TestClientFactory.Create(channel, method1);
 
-            var reply = await client.UnaryCall(new HelloRequest { Name = "Balancer" });
+            // Act
+            var reply = await client.UnaryCall(new HelloRequest { Name = "Balancer" }).ResponseAsync.DefaultTimeout();
 
+            // Assert
             Assert.AreEqual("Balancer", reply.Message);
             Assert.AreEqual("127.0.0.1:50150", host);
 
@@ -90,8 +92,10 @@ namespace Grpc.Net.Client.Tests.Balancer
             using var server1New = CreateServer(50150);
             method1 = server1New.DynamicGrpc.AddUnaryMethod<HelloRequest, HelloReply>(UnaryMethod, nameof(UnaryMethod));
 
-            reply = await client.UnaryCall(new HelloRequest { Name = "Balancer" });
+            // Act
+            reply = await client.UnaryCall(new HelloRequest { Name = "Balancer" }).ResponseAsync.DefaultTimeout();
 
+            // Assert
             Assert.AreEqual("Balancer", reply.Message);
             Assert.AreEqual("127.0.0.1:50150", host);
         }
@@ -121,8 +125,15 @@ namespace Grpc.Net.Client.Tests.Balancer
             var method2 = server2.DynamicGrpc.AddUnaryMethod<HelloRequest, HelloReply>(UnaryMethod, nameof(UnaryMethod));
             var url2 = server2.GetUrl(TestServerEndpointName.Http2);
 
-            var grpcConnection = new GrpcConnection(new StaticAddressResolver(new[] { new DnsEndPoint(url1.Host, url1.Port), new DnsEndPoint(url2.Host, url2.Port) }), LoggerFactory);
-            grpcConnection.Start();
+            using var grpcConnection = new GrpcConnection(new StaticAddressResolver(new[] { new DnsEndPoint(url1.Host, url1.Port), new DnsEndPoint(url2.Host, url2.Port) }), LoggerFactory);
+            grpcConnection.ConfigureBalancer(c => new RoundRobinBalancer(c, new TestRandomGenerator()));
+
+            await grpcConnection.ConnectAsync(CancellationToken.None);
+            await TestHelpers.AssertIsTrueRetryAsync(() =>
+            {
+                var picker = grpcConnection._picker as RoundRobinPicker;
+                return picker?._subConnections.Count == 2;
+            }, "Wait for all subconnections to be connected.").DefaultTimeout();
 
             var channel = GrpcChannel.ForAddress(url1, new GrpcChannelOptions
             {
@@ -132,15 +143,21 @@ namespace Grpc.Net.Client.Tests.Balancer
 
             var client = TestClientFactory.Create(channel, method1);
 
-            var reply = await client.UnaryCall(new HelloRequest { Name = "Balancer" });
+            // Act
+            var reply = await client.UnaryCall(new HelloRequest { Name = "Balancer" }).ResponseAsync.DefaultTimeout();
+            // Assert
             Assert.AreEqual("Balancer", reply.Message);
             Assert.AreEqual("127.0.0.1:50150", host);
 
-            reply = await client.UnaryCall(new HelloRequest { Name = "Balancer" });
+            // Act
+            reply = await client.UnaryCall(new HelloRequest { Name = "Balancer" }).ResponseAsync.DefaultTimeout();
+            // Assert
             Assert.AreEqual("Balancer", reply.Message);
             Assert.AreEqual("127.0.0.1:50151", host);
 
-            reply = await client.UnaryCall(new HelloRequest { Name = "Balancer" });
+            // Act
+            reply = await client.UnaryCall(new HelloRequest { Name = "Balancer" }).ResponseAsync.DefaultTimeout();
+            // Assert
             Assert.AreEqual("Balancer", reply.Message);
             Assert.AreEqual("127.0.0.1:50150", host);
         }
@@ -171,7 +188,7 @@ namespace Grpc.Net.Client.Tests.Balancer
             var url2 = server2.GetUrl(TestServerEndpointName.Http2);
 
             var grpcConnection = new GrpcConnection(new StaticAddressResolver(new[] { new DnsEndPoint(url1.Host, url1.Port), new DnsEndPoint(url2.Host, url2.Port) }), LoggerFactory);
-            grpcConnection.Start();
+            await grpcConnection.ConnectAsync(CancellationToken.None);
 
             var channel = GrpcChannel.ForAddress(url1, new GrpcChannelOptions
             {
@@ -202,6 +219,14 @@ namespace Grpc.Net.Client.Tests.Balancer
                     listenOptions.Protocols = HttpProtocols.Http2;
                 });
             });
+        }
+
+        private class TestRandomGenerator : IRandomGenerator
+        {
+            public int Next(int minValue, int maxValue)
+            {
+                return 0;
+            }
         }
     }
 }

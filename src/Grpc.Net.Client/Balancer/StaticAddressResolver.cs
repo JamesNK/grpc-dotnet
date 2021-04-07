@@ -20,6 +20,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net;
+using System.Threading;
 using System.Threading.Tasks;
 
 #if NET5_0_OR_GREATER
@@ -37,7 +38,7 @@ namespace Grpc.Net.Client.Balancer
             _addresses = addresses.ToList();
         }
 
-        public override Task RefreshAsync()
+        public override Task RefreshAsync(CancellationToken cancellationToken)
         {
             return Task.CompletedTask;
         }

@@ -23,12 +23,22 @@ using System;
 
 namespace Grpc.Net.Client.Balancer
 {
-    public abstract class LoadBalancer
+    public abstract class LoadBalancer : IDisposable
     {
         public abstract void UpdateConnectionState(ConnectionState state);
         public abstract void ResolverError(Exception exception);
         public abstract void UpdateSubConnectionState(SubConnection subConnection, SubConnectionState state);
         public abstract void Close();
+
+        protected virtual void Dispose(bool disposing)
+        {
+        }
+
+        public void Dispose()
+        {
+            Dispose(disposing: true);
+            GC.SuppressFinalize(this);
+        }
     }
 
 }

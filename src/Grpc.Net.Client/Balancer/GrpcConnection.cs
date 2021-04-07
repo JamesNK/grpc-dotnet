@@ -16,15 +16,15 @@
 
 #endregion
 
-#if NET5_0_OR_GREATER
-#pragma warning disable CS1591 // Missing XML comment for publicly visible type or member
-
 using System;
 using System.Collections.Generic;
 using System.Net;
+using System.Threading;
 using System.Threading.Tasks;
-using Grpc.Net.Client.Balancer;
 using Microsoft.Extensions.Logging;
+
+#if NET5_0_OR_GREATER
+#pragma warning disable CS1591 // Missing XML comment for publicly visible type or member
 
 namespace Grpc.Net.Client.Balancer
 {
@@ -35,14 +35,9 @@ namespace Grpc.Net.Client.Balancer
         internal LoadBalancer? _balancer;
         private IDisposable? _resolverSubscription;
 
-        public override ILoggerFactory LoggerFactory { get; }
-        public ILogger Logger { get; }
-
-        public GrpcConnection(AddressResolver resolver, ILoggerFactory loggerFactory)
+        public GrpcConnection(AddressResolver resolver, ILoggerFactory loggerFactory) : base(loggerFactory)
         {
             _resolver = resolver;
-            LoggerFactory = loggerFactory;
-            Logger = loggerFactory.CreateLogger<GrpcConnection>();
         }
 
         public void ConfigureBalancer(Func<GrpcConnection, LoadBalancer> configure)
@@ -50,30 +45,23 @@ namespace Grpc.Net.Client.Balancer
             _balancer = configure(this);
         }
 
-        public void Start()
-        {
-            // Default to PickFirstBalancer
-            if (_balancer == null)
-            {
-                _balancer = new PickFirstBalancer(this);
-            }
-
-            _resolverSubscription = _resolver.Subscribe(new ResolverObserver(this));
-        }
-
         public override SubConnection CreateSubConnection(SubConnectionOptions options)
         {
-            return new GrpcSubConnection(this, options.Addresses);
+            var subConnection = new GrpcSubConnection(this, options.Addresses);
+
+            Logger.LogInformation("Created sub-connection: " + subConnection);
+
+            return subConnection;
         }
 
         public override void RemoveSubConnection(SubConnection subConnection)
         {
-            throw new NotImplementedException();
+            Logger.LogInformation("Removing sub-connection: " + subConnection);
         }
 
-        public override Task ResolveNowAsync()
+        public override Task ResolveNowAsync(CancellationToken cancellationToken)
         {
-            return _resolver.RefreshAsync();
+            return _resolver.RefreshAsync(cancellationToken);
         }
 
         public override void UpdateAddresses(SubConnection subConnection, IReadOnlyList<DnsEndPoint> addresses)
@@ -94,11 +82,29 @@ namespace Grpc.Net.Client.Balancer
         public void Dispose()
         {
             _resolverSubscription?.Dispose();
+            _balancer?.Dispose();
         }
 
         internal void OnSubConnectionStateChange(GrpcSubConnection subConnection, ConnectivityState state)
         {
+            Logger.LogInformation("Sub-connection state change: " + subConnection + " " + state);
             _balancer!.UpdateSubConnectionState(subConnection, new SubConnectionState { ConnectivityState = state });
+        }
+
+        public override Task ConnectAsync(CancellationToken cancellationToken)
+        {
+            if (_resolverSubscription == null)
+            {
+                // Default to PickFirstBalancer
+                if (_balancer == null)
+                {
+                    _balancer = new PickFirstBalancer(this);
+                }
+
+                _resolverSubscription = _resolver.Subscribe(new ResolverObserver(this));
+            }
+
+            return Task.CompletedTask;
         }
 
         private class ResolverObserver : IObserver<AddressResolverResult>

@@ -97,19 +97,19 @@ namespace Grpc.Net.Client.Balancer
 
     public class PickResult
     {
-        private readonly Action<CompleteContext> _onComplete;
+        private readonly Action<CompleteContext>? _onComplete;
 
-        public PickResult(SubConnection subConnection, Action<CompleteContext> onComplete)
+        public PickResult(SubConnection? subConnection, Action<CompleteContext>? onComplete)
         {
             SubConnection = subConnection;
             _onComplete = onComplete;
         }
 
-        public SubConnection SubConnection { get; }
+        public SubConnection? SubConnection { get; }
 
         public void Complete(CompleteContext context)
         {
-            _onComplete(context);
+            _onComplete?.Invoke(context);
         }
     }
 
