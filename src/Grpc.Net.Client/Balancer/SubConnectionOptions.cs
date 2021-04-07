@@ -20,12 +20,14 @@
 #pragma warning disable CS1591 // Missing XML comment for publicly visible type or member
 
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Net;
 
 namespace Grpc.Net.Client.Balancer
 {
     public class SubConnectionOptions
     {
+        [DebuggerStepThrough]
         public SubConnectionOptions(IReadOnlyList<DnsEndPoint> addresses)
         {
             Addresses = addresses;

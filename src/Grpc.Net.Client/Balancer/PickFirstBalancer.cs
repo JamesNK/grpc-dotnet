@@ -29,7 +29,7 @@ namespace Grpc.Net.Client.Balancer
     public class PickFirstBalancer : LoadBalancer
     {
         private readonly ClientConnection _connection;
-        private SubConnection? _subConnection;
+        internal SubConnection? _subConnection;
         private ILogger _logger;
 
         public PickFirstBalancer(ClientConnection connection)

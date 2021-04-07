@@ -31,7 +31,10 @@ namespace Grpc.AspNetCore.FunctionalTests.Infrastructure
     {
         private readonly InProcessTestServer _server;
 
-        public GrpcTestFixture(Action<IServiceCollection>? initialConfigureServices = null, Action<KestrelServerOptions, IDictionary<TestServerEndpointName, string>>? configureKestrel = null)
+        public GrpcTestFixture(
+            Action<IServiceCollection>? initialConfigureServices = null,
+            Action<KestrelServerOptions, IDictionary<TestServerEndpointName, string>>? configureKestrel = null,
+            TestServerEndpointName? defaultClientEndpointName = null)
         {
             LoggerFactory = new LoggerFactory();
 
@@ -96,7 +99,7 @@ namespace Grpc.AspNetCore.FunctionalTests.Infrastructure
             AppContext.SetSwitch("System.Net.Http.SocketsHttpHandler.Http2UnencryptedSupport", true);
 #endif
 
-            (Client, Handler) = CreateHttpCore();
+            (Client, Handler) = CreateHttpCore(defaultClientEndpointName);
         }
 
         public ILoggerFactory LoggerFactory { get; }

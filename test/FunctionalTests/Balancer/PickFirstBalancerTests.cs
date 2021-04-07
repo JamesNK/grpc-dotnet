@@ -20,24 +20,18 @@
 
 using System;
 using System.Collections.Generic;
-using System.Diagnostics;
-using System.IO;
-using System.Linq;
 using System.Net;
 using System.Net.Http;
-using System.Net.Sockets;
-using System.Threading;
 using System.Threading.Tasks;
-using System.Threading.Tasks.Sources;
+using FunctionalTestsWebsite;
+using Google.Protobuf;
 using Greet;
 using Grpc.AspNetCore.FunctionalTests;
-using Grpc.AspNetCore.FunctionalTests.Client;
 using Grpc.AspNetCore.FunctionalTests.Infrastructure;
 using Grpc.Core;
 using Grpc.Net.Client.Balancer;
-using Grpc.Shared;
+using Grpc.Net.Client.Web;
 using Grpc.Tests.Shared;
-using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.Extensions.Logging;
 using NUnit.Framework;
@@ -47,6 +41,21 @@ namespace Grpc.Net.Client.Tests.Balancer
     [TestFixture]
     public class PickFirstBalancerTests : FunctionalTestBase
     {
+        private GrpcChannel CreateGrpcWebChannel(TestServerEndpointName endpointName, Version? version)
+        {
+            var grpcWebHandler = new GrpcWebHandler(GrpcWebMode.GrpcWeb);
+            grpcWebHandler.HttpVersion = version;
+
+            var httpClient = Fixture.CreateClient(endpointName, grpcWebHandler);
+            var channel = GrpcChannel.ForAddress(httpClient.BaseAddress!, new GrpcChannelOptions
+            {
+                HttpClient = httpClient,
+                LoggerFactory = LoggerFactory
+            });
+
+            return channel;
+        }
+
         [Test]
         public async Task UnaryCall_ReconnectBetweenCalls_Success()
         {
@@ -64,29 +73,28 @@ namespace Grpc.Net.Client.Tests.Balancer
             }
 
             // Arrange
-            using var server1 = CreateServer(50150);
-            var method1 = server1.DynamicGrpc.AddUnaryMethod<HelloRequest, HelloReply>(UnaryMethod, nameof(UnaryMethod));
-            var url1 = server1.GetUrl(TestServerEndpointName.Http2);
+            using var endpoint = BalancerHelpers.CreateGrpcEndpoint<HelloRequest, HelloReply>(50150, UnaryMethod, nameof(UnaryMethod));
 
-            var grpcConnection = new GrpcConnection(new StaticAddressResolver(new[] { new DnsEndPoint(url1.Host, url1.Port) }), LoggerFactory);
+            var grpcConnection = new GrpcConnection(new StaticAddressResolver(new[] { new DnsEndPoint(endpoint.Address.Host, endpoint.Address.Port) }), LoggerFactory);
 
-            var channel = GrpcChannel.ForAddress(url1, new GrpcChannelOptions
+            var channel = GrpcChannel.ForAddress(endpoint.Address, new GrpcChannelOptions
             {
                 LoggerFactory = LoggerFactory,
                 HttpHandler = new BalancerHttpHandler(new SocketsHttpHandler(), grpcConnection)
             });
 
-            var client = TestClientFactory.Create(channel, method1);
+            var client = TestClientFactory.Create(channel, endpoint.Method);
 
+            // Act
             var reply = await client.UnaryCall(new HelloRequest { Name = "Balancer" });
 
+            // Assert
             Assert.AreEqual("Balancer", reply.Message);
             Assert.AreEqual("127.0.0.1:50150", host);
 
-            server1.Dispose();
+            endpoint.Dispose();
 
-            using var server1New = CreateServer(50150);
-            method1 = server1New.DynamicGrpc.AddUnaryMethod<HelloRequest, HelloReply>(UnaryMethod, nameof(UnaryMethod));
+            using var endpointNew = BalancerHelpers.CreateGrpcEndpoint<HelloRequest, HelloReply>(50150, UnaryMethod, nameof(UnaryMethod));
 
             reply = await client.UnaryCall(new HelloRequest { Name = "Balancer" });
 
@@ -111,45 +119,108 @@ namespace Grpc.Net.Client.Tests.Balancer
             }
 
             // Arrange
-            using var server1 = CreateServer(50150);
-            var method1 = server1.DynamicGrpc.AddUnaryMethod<HelloRequest, HelloReply>(UnaryMethod, nameof(UnaryMethod));
-            var url1 = server1.GetUrl(TestServerEndpointName.Http2);
+            using var endpoint1 = BalancerHelpers.CreateGrpcEndpoint<HelloRequest, HelloReply>(50150, UnaryMethod, nameof(UnaryMethod));
+            using var endpoint2 = BalancerHelpers.CreateGrpcEndpoint<HelloRequest, HelloReply>(50151, UnaryMethod, nameof(UnaryMethod));
 
-            using var server2 = CreateServer(50151);
-            var method2 = server2.DynamicGrpc.AddUnaryMethod<HelloRequest, HelloReply>(UnaryMethod, nameof(UnaryMethod));
-            var url2 = server2.GetUrl(TestServerEndpointName.Http2);
+            var grpcConnection = new GrpcConnection(new StaticAddressResolver(new[]
+            {
+                new DnsEndPoint(endpoint1.Address.Host, endpoint1.Address.Port),
+                new DnsEndPoint(endpoint2.Address.Host, endpoint2.Address.Port)
+            }), LoggerFactory);
 
-            var grpcConnection = new GrpcConnection(new StaticAddressResolver(new[] { new DnsEndPoint(url1.Host, url1.Port), new DnsEndPoint(url2.Host, url2.Port) }), LoggerFactory);
-
-            var channel = GrpcChannel.ForAddress(url1, new GrpcChannelOptions
+            var channel = GrpcChannel.ForAddress(endpoint1.Address, new GrpcChannelOptions
             {
                 LoggerFactory = LoggerFactory,
                 HttpHandler = new BalancerHttpHandler(new SocketsHttpHandler(), grpcConnection)
             });
 
-            var client = TestClientFactory.Create(channel, method1);
+            var client = TestClientFactory.Create(channel, endpoint1.Method);
 
+            // Act
             var reply = await client.UnaryCall(new HelloRequest { Name = "Balancer" });
+
+            // Assert
             Assert.AreEqual("Balancer", reply.Message);
             Assert.AreEqual("127.0.0.1:50150", host);
 
-            server1.Dispose();
+            endpoint1.Dispose();
 
             reply = await client.UnaryCall(new HelloRequest { Name = "Balancer" });
             Assert.AreEqual("Balancer", reply.Message);
             Assert.AreEqual("127.0.0.1:50151", host);
         }
 
-        private GrpcTestFixture<FunctionalTestsWebsite.Startup> CreateServer(int port)
+        [Test]
+        public async Task UnaryCall_MultipleStreams_UnavailableAddress_FallbackToWorkingAddress()
         {
-            return new GrpcTestFixture<FunctionalTestsWebsite.Startup>(ConfigureServices, (options, urls) =>
+            // Ignore errors
+            SetExpectedErrorsFilter(writeContext =>
             {
-                urls[TestServerEndpointName.Http2] = $"http://127.0.0.1:{port}";
-                options.ListenLocalhost(port, listenOptions =>
-                {
-                    listenOptions.Protocols = HttpProtocols.Http2;
-                });
+                return true;
             });
+
+            var tcs = new TaskCompletionSource<object?>(TaskCreationOptions.RunContinuationsAsynchronously);
+            string? host = null;
+            async Task<HelloReply> UnaryMethod(HelloRequest request, ServerCallContext context)
+            {
+                await tcs.Task;
+                host = context.Host;
+                return new HelloReply { Message = request.Name };
+            }
+
+            // Arrange
+            using var endpoint1 = BalancerHelpers.CreateGrpcEndpoint<HelloRequest, HelloReply>(50150, UnaryMethod, nameof(UnaryMethod));
+            using var endpoint2 = BalancerHelpers.CreateGrpcEndpoint<HelloRequest, HelloReply>(50151, UnaryMethod, nameof(UnaryMethod));
+
+            var grpcConnection = new GrpcConnection(new StaticAddressResolver(new[]
+            {
+                new DnsEndPoint(endpoint1.Address.Host, endpoint1.Address.Port),
+                new DnsEndPoint(endpoint2.Address.Host, endpoint2.Address.Port)
+            }), LoggerFactory);
+
+            PickFirstBalancer? balancer = null;
+            grpcConnection.ConfigureBalancer(c => balancer = new PickFirstBalancer(c));
+
+            var channel = GrpcChannel.ForAddress(endpoint1.Address, new GrpcChannelOptions
+            {
+                LoggerFactory = LoggerFactory,
+                HttpHandler = new BalancerHttpHandler(new SocketsHttpHandler { EnableMultipleHttp2Connections = true }, grpcConnection)
+            });
+
+            var client = TestClientFactory.Create(channel, endpoint1.Method);
+
+            // Act
+            var callTasks = new List<Task>();
+            for (int i = 0; i < 150; i++)
+            {
+                Logger.LogInformation($"Sending gRPC call {i}");
+
+                callTasks.Add(client.UnaryCall(new HelloRequest { Name = "Balancer" }).ResponseAsync);
+            }
+
+            Logger.LogInformation($"Done sending gRPC calls");
+
+            var subConnection = (GrpcSubConnection) balancer!._subConnection!;
+            var activeTransports = subConnection._activeTransports;
+
+            // Assert
+            Assert.AreEqual(2, activeTransports.Count);
+            Assert.AreEqual(new DnsEndPoint("127.0.0.1", 50150), activeTransports[0].EndPoint);
+            Assert.AreEqual(new DnsEndPoint("127.0.0.1", 50150), activeTransports[1].EndPoint);
+
+            tcs.SetResult(null);
+
+            await Task.WhenAll(callTasks).DefaultTimeout();
+
+            endpoint1.Dispose();
+            Assert.AreEqual(0, activeTransports.Count);
+
+            var reply = await client.UnaryCall(new HelloRequest { Name = "Balancer" }).ResponseAsync.DefaultTimeout();
+            Assert.AreEqual("Balancer", reply.Message);
+            Assert.AreEqual("127.0.0.1:50151", host);
+
+            Assert.AreEqual(1, activeTransports.Count);
+            Assert.AreEqual(new DnsEndPoint("127.0.0.1", 50151), activeTransports[0].EndPoint);
         }
     }
 }

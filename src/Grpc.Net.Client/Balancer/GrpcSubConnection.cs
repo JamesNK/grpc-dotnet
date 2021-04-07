@@ -17,7 +17,6 @@
 #endregion
 
 #if NET5_0_OR_GREATER
-#pragma warning disable CS1591 // Missing XML comment for publicly visible type or member
 
 using System;
 using System.Collections.Generic;
@@ -39,9 +38,10 @@ namespace Grpc.Net.Client.Balancer
         private readonly List<DnsEndPoint> _addresses;
         private readonly GrpcConnection _connection;
         private readonly SemaphoreSlim _connectionCreateLock;
-        private readonly List<(Socket Socket, Stream? Stream)> _activeTransports;
+        internal readonly List<(DnsEndPoint EndPoint, Socket Socket, Stream? Stream)> _activeTransports;
         private readonly object _lock;
 
+        private Socket? _initialSocket;
         private DnsEndPoint? _currentEndPoint;
         private ConnectivityState _state;
         private Task? _connectTask;
@@ -58,7 +58,7 @@ namespace Grpc.Net.Client.Balancer
             _addresses = addresses.ToList();
             _connection = connection;
             _connectionCreateLock = new SemaphoreSlim(1);
-            _activeTransports = new List<(Socket, Stream?)>();
+            _activeTransports = new List<(DnsEndPoint, Socket, Stream?)>();
         }
 
         public void UpdateAddresses(IReadOnlyList<DnsEndPoint> addresses)
@@ -178,7 +178,7 @@ namespace Grpc.Net.Client.Balancer
                         await socket.ConnectAsync(currentEndPoint, cancellationToken).ConfigureAwait(false);
                         Logger.LogInformation("Connected: " + currentEndPoint);
 
-                        _activeTransports.Add((socket, null));
+                        _initialSocket = socket;
 
                         UpdateConnectivityState(ConnectivityState.Ready);
                         return currentEndPoint;
@@ -208,53 +208,54 @@ namespace Grpc.Net.Client.Balancer
         {
             Logger.LogInformation("GetStreamAsync: " + CurrentEndPoint);
 
-            //if (!Equals(endPoint, CurrentEndPoint))
-            //{
-            //    throw new InvalidOperationException();
-            //}
-
-            if (_activeTransports.Count == 1 && _activeTransports[0].Stream == null)
+            Socket? socket = null;
+            lock (_lock)
             {
-                var networkStream = new NetworkStream(_activeTransports[0].Socket, ownsSocket: true);
-                var stream = new StreamWrapper(networkStream, OnStreamDisposed);
-
-                _activeTransports[0] = (_activeTransports[0].Socket, stream);
-
-                return stream;
+                if (_initialSocket != null)
+                {
+                    socket = _initialSocket;
+                    _initialSocket = null;
+                }
             }
-            else
+
+            if (socket == null)
             {
-                var socket = new Socket(SocketType.Stream, ProtocolType.Tcp) { NoDelay = true };
+                socket = new Socket(SocketType.Stream, ProtocolType.Tcp) { NoDelay = true };
                 await socket.ConnectAsync(endPoint, cancellationToken).ConfigureAwait(false);
-
-                var networkStream = new NetworkStream(socket, ownsSocket: true);
-                var stream = new StreamWrapper(networkStream, OnStreamDisposed);
-
-                _activeTransports.Add((socket, stream));
-
-                return stream;
             }
 
-            throw new InvalidOperationException();
+            var networkStream = new NetworkStream(socket, ownsSocket: true);
+            var stream = new StreamWrapper(networkStream, OnStreamDisposed);
+
+            lock (_lock)
+            {
+                _activeTransports.Add((endPoint, socket, stream));
+                Logger.LogInformation("Transport created");
+            }
+
+            return stream;
         }
 
         private void OnStreamDisposed(Stream streamWrapper)
         {
-            for (var i = _activeTransports.Count - 1; i >= 0; i--)
+            lock (_lock)
             {
-                var t = _activeTransports[i];
-                if (t.Stream == streamWrapper)
+                for (var i = _activeTransports.Count - 1; i >= 0; i--)
                 {
-                    _activeTransports.RemoveAt(i);
-                    Logger.LogInformation("Disconnected: " + CurrentEndPoint);
-
-                    if (_activeTransports.Count == 0)
+                    var t = _activeTransports[i];
+                    if (t.Stream == streamWrapper)
                     {
-                        _currentEndPoint = null;
-                        UpdateConnectivityState(ConnectivityState.Idle);
-                    }
+                        _activeTransports.RemoveAt(i);
+                        Logger.LogInformation("Disconnected: " + CurrentEndPoint);
 
-                    return;
+                        if (_activeTransports.Count == 0)
+                        {
+                            _currentEndPoint = null;
+                            UpdateConnectivityState(ConnectivityState.Idle);
+                        }
+
+                        return;
+                    }
                 }
             }
         }
@@ -266,5 +267,4 @@ namespace Grpc.Net.Client.Balancer
     }
 }
 
-#pragma warning restore CS1591 // Missing XML comment for publicly visible type or member
 #endif

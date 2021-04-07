@@ -48,6 +48,7 @@ namespace Grpc.Net.Client.Balancer
 
     public class BalancerState
     {
+        [DebuggerStepThrough]
         public BalancerState(ConnectivityState connectivityState, SubConnectionPicker picker)
         {
             ConnectivityState = connectivityState;
@@ -66,6 +67,7 @@ namespace Grpc.Net.Client.Balancer
 
     public class ConnectionState
     {
+        [DebuggerStepThrough]
         public ConnectionState(AddressResolverResult resolverState, GrpcAttributes options)
         {
             ResolverState = resolverState;
@@ -89,6 +91,7 @@ namespace Grpc.Net.Client.Balancer
     {
         public HttpRequestMessage Request { get; }
 
+        [DebuggerStepThrough]
         public PickContext(HttpRequestMessage request)
         {
             Request = request;
@@ -99,6 +102,7 @@ namespace Grpc.Net.Client.Balancer
     {
         private readonly Action<CompleteContext>? _onComplete;
 
+        [DebuggerStepThrough]
         public PickResult(SubConnection? subConnection, Action<CompleteContext>? onComplete)
         {
             SubConnection = subConnection;
