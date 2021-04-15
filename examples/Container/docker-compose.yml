@@ -1,0 +1,16 @@
+version: '3'
+services:
+  container-client:
+    build:
+      context: ./../../
+      dockerfile: ./examples/Container/Client/Dockerfile
+    image: grpc-dotnet/container-client
+    ports:
+      - "8080:80"
+  container-server:
+    build:
+      context: ./../../
+      dockerfile: ./examples/Container/Server/Dockerfile
+    image: grpc-dotnet/container-server
+    ports:
+      - "8081:80"
