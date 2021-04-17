@@ -83,6 +83,10 @@ namespace Grpc.Net.Client.Balancer
             SubConnectionPicker? previousPicker = null;
 
             PickResult result;
+
+            // Wait for a valid picker. When the client state changes a new picker will be returned.
+            // Cancellation will break out of the loop. Typically cancellation will come from a
+            // deadline specified for a call being exceeded.
             while (true)
             {
                 var currentPicker = await GetPickerAsync(previousPicker, cancellationToken).ConfigureAwait(false);
@@ -104,16 +108,7 @@ namespace Grpc.Net.Client.Balancer
 
             if (result.SubConnection.CurrentEndPoint == null)
             {
-                try
-                {
-                    Logger.LogInformation("HACK: Connecting in picker!?");
-
-                    await result.SubConnection.ConnectAsync(cancellationToken).ConfigureAwait(false);
-                }
-                catch
-                {
-                    throw;
-                }
+                await result.SubConnection.ConnectAsync(cancellationToken).ConfigureAwait(false);
             }
 
             return result;
