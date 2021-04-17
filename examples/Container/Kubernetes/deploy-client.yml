@@ -30,7 +30,7 @@ spec:
             - name: ASPNETCORE_URLS
               value: http://+:80
             - name: BackendUrl
-              value: http://server
+              value: dns://server.default.svc.cluster.local
 ---
 apiVersion: v1
 kind: Service

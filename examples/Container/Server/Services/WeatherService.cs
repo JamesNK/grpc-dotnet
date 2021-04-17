@@ -32,8 +32,14 @@ namespace Server.Services
             "Freezing", "Bracing", "Chilly", "Cool", "Mild", "Warm", "Balmy", "Hot", "Sweltering", "Scorching"
         };
 
-        public override Task<GetWeatherForecastsResponse> GetWeatherForecasts(Empty request, ServerCallContext context)
+        public override async Task<GetWeatherForecastsResponse> GetWeatherForecasts(Empty request, ServerCallContext context)
         {
+            var httpContext = context.GetHttpContext();
+            await context.WriteResponseHeadersAsync(new Metadata
+            {
+                { "host", $"{httpContext.Request.Scheme}://{httpContext.Request.Host}" }
+            });
+
             var rng = new Random();
             var results = Enumerable.Range(1, 5).Select(index => new WeatherForecast
             {
@@ -45,7 +51,7 @@ namespace Server.Services
             var response = new GetWeatherForecastsResponse();
             response.Forecasts.AddRange(results);
 
-            return Task.FromResult(response);
+            return response;
         }
     }
 }

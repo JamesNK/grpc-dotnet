@@ -46,14 +46,12 @@ namespace Grpc.Net.Client.Balancer
             _nextPickerLock = new SemaphoreSlim(1);
             _nextPickerTcs = new TaskCompletionSource<SubConnectionPicker>(TaskCreationOptions.RunContinuationsAsynchronously);
 
-            LoggerFactory = loggerFactory;
             Logger = loggerFactory.CreateLogger(GetType());
         }
 
         public ConnectivityState State => _state;
 
         public ILogger Logger { get; }
-        public ILoggerFactory LoggerFactory { get; }
         public abstract SubConnection CreateSubConnection(SubConnectionOptions options);
         public abstract void RemoveSubConnection(SubConnection subConnection);
         public abstract void UpdateAddresses(SubConnection subConnection, IReadOnlyList<DnsEndPoint> addresses);
@@ -114,8 +112,6 @@ namespace Grpc.Net.Client.Balancer
                 }
                 catch
                 {
-                    Debugger.Launch();
-
                     throw;
                 }
             }

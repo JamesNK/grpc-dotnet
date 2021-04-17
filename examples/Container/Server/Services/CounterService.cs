@@ -27,6 +27,12 @@ namespace Server.Services
     {
         public override async Task StartCounter(CounterRequest request, IServerStreamWriter<CounterResponse> responseStream, ServerCallContext context)
         {
+            var httpContext = context.GetHttpContext();
+            await context.WriteResponseHeadersAsync(new Metadata
+            {
+                { "host", $"{httpContext.Request.Scheme}://{httpContext.Request.Host}" }
+            });
+
             var count = request.Start;
 
             while (!context.CancellationToken.IsCancellationRequested)

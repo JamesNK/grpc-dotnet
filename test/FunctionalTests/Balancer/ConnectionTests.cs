@@ -75,7 +75,7 @@ namespace Grpc.Net.Client.Tests.Balancer
             }), LoggerFactory);
 
             PickFirstBalancer? balancer = null;
-            grpcConnection.ConfigureBalancer(c => balancer = new PickFirstBalancer(c));
+            grpcConnection.ConfigureBalancer(c => balancer = new PickFirstBalancer(c, LoggerFactory));
 
             var socketsHttpHandler = new SocketsHttpHandler
             {
@@ -86,7 +86,7 @@ namespace Grpc.Net.Client.Tests.Balancer
             var channel = GrpcChannel.ForAddress(endpoint1.Address, new GrpcChannelOptions
             {
                 LoggerFactory = LoggerFactory,
-                HttpHandler = new BalancerHttpHandler(grpcWebHandler, grpcConnection)
+                HttpHandler = BalancerHelpers.CreateBalancerHandler(grpcConnection, LoggerFactory, innerHandler: grpcWebHandler)
             });
 
             var client = TestClientFactory.Create(channel, endpoint1.Method);

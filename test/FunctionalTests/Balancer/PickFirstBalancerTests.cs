@@ -80,7 +80,7 @@ namespace Grpc.Net.Client.Tests.Balancer
             var channel = GrpcChannel.ForAddress(endpoint.Address, new GrpcChannelOptions
             {
                 LoggerFactory = LoggerFactory,
-                HttpHandler = new BalancerHttpHandler(new SocketsHttpHandler(), grpcConnection)
+                HttpHandler = BalancerHelpers.CreateBalancerHandler(grpcConnection, LoggerFactory)
             });
 
             var client = TestClientFactory.Create(channel, endpoint.Method);
@@ -131,7 +131,7 @@ namespace Grpc.Net.Client.Tests.Balancer
             var channel = GrpcChannel.ForAddress(endpoint1.Address, new GrpcChannelOptions
             {
                 LoggerFactory = LoggerFactory,
-                HttpHandler = new BalancerHttpHandler(new SocketsHttpHandler(), grpcConnection)
+                HttpHandler = BalancerHelpers.CreateBalancerHandler(grpcConnection, LoggerFactory)
             });
 
             var client = TestClientFactory.Create(channel, endpoint1.Method);
@@ -179,12 +179,12 @@ namespace Grpc.Net.Client.Tests.Balancer
             }), LoggerFactory);
 
             PickFirstBalancer? balancer = null;
-            grpcConnection.ConfigureBalancer(c => balancer = new PickFirstBalancer(c));
+            grpcConnection.ConfigureBalancer(c => balancer = new PickFirstBalancer(c, LoggerFactory));
 
             var channel = GrpcChannel.ForAddress(endpoint1.Address, new GrpcChannelOptions
             {
                 LoggerFactory = LoggerFactory,
-                HttpHandler = new BalancerHttpHandler(new SocketsHttpHandler { EnableMultipleHttp2Connections = true }, grpcConnection)
+                HttpHandler = BalancerHelpers.CreateBalancerHandler(grpcConnection, LoggerFactory)
             });
 
             var client = TestClientFactory.Create(channel, endpoint1.Method);
@@ -200,7 +200,7 @@ namespace Grpc.Net.Client.Tests.Balancer
 
             Logger.LogInformation($"Done sending gRPC calls");
 
-            var subConnection = (GrpcSubConnection) balancer!._subConnection!;
+            var subConnection = (GrpcSubConnection)balancer!._subConnection!;
             var activeTransports = subConnection._activeTransports;
 
             // Assert

@@ -1,6 +1,9 @@
+using System;
+using System.Linq;
 using System.Net.Http;
+using Grpc.Core;
 using Grpc.Net.Client;
-using Grpc.Net.Client.Web;
+using Grpc.Net.Client.Balancer;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Hosting;
@@ -40,10 +43,26 @@ namespace Client
                     backendUrl = navigationManager.BaseUri;
                 }
 
-                return GrpcChannel.ForAddress(backendUrl, new GrpcChannelOptions
+                var loggerFactory = services.GetRequiredService<ILoggerFactory>();
+                var grpcConnection = new GrpcConnection(new DnsAddressResolver(new Uri(backendUrl), loggerFactory), loggerFactory);
+                grpcConnection.ConfigureBalancer(c => new RoundRobinBalancer(c, loggerFactory));
+
+                return grpcConnection;
+            });
+
+            services.AddSingleton(services =>
+            {
+                var grpcConnection = services.GetRequiredService<GrpcConnection>();
+                var loggerFactory = services.GetRequiredService<ILoggerFactory>();
+
+                var channel = GrpcChannel.ForAddress("http://localhost", new GrpcChannelOptions
                 {
-                    LoggerFactory = services.GetRequiredService<ILoggerFactory>()
+                    Credentials = ChannelCredentials.Insecure,
+                    LoggerFactory = loggerFactory,
+                    HttpHandler = new BalancerHttpHandler(new SocketsHttpHandler(), grpcConnection)
                 });
+
+                return channel;
             });
         }
 

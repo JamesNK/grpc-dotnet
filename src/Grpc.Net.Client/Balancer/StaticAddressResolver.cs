@@ -31,7 +31,8 @@ namespace Grpc.Net.Client.Balancer
     public class StaticAddressResolver : AddressResolver
     {
         private readonly List<DnsEndPoint> _addresses;
-        private List<IObserver<AddressResolverResult>> _subscriptions = new List<IObserver<AddressResolverResult>>();
+        private readonly List<IObserver<AddressResolverResult>> _subscriptions = new List<IObserver<AddressResolverResult>>();
+        private readonly object _lock = new object();
 
         public StaticAddressResolver(IEnumerable<DnsEndPoint> addresses)
         {
@@ -45,18 +46,32 @@ namespace Grpc.Net.Client.Balancer
 
         public override void Shutdown()
         {
-            foreach (var subscription in _subscriptions)
+            lock (_lock)
             {
-                subscription.OnCompleted();
+                foreach (var subscription in _subscriptions)
+                {
+                    subscription.OnCompleted();
+                }
+                _subscriptions.Clear();
             }
-            _subscriptions.Clear();
         }
 
         public override IDisposable Subscribe(IObserver<AddressResolverResult> observer)
         {
-            _subscriptions.Add(observer);
+            lock (_lock)
+            {
+                _subscriptions.Add(observer);
+            }
             observer.OnNext(new AddressResolverResult(_addresses));
             return new Subscription(this, observer);
+        }
+
+        private void Unsubscribe(IObserver<AddressResolverResult> observer)
+        {
+            lock (_lock)
+            {
+                _subscriptions.Remove(observer);
+            }
         }
 
         private class Subscription : IDisposable
@@ -72,7 +87,7 @@ namespace Grpc.Net.Client.Balancer
 
             public void Dispose()
             {
-                _nameResolver._subscriptions.Remove(_observer);
+                _nameResolver.Unsubscribe(_observer);
             }
         }
     }

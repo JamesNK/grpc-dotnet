@@ -18,6 +18,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Net;
 using System.Threading;
 using System.Threading.Tasks;
@@ -28,16 +29,27 @@ using Microsoft.Extensions.Logging;
 
 namespace Grpc.Net.Client.Balancer
 {
-    internal class GrpcConnection : ClientConnection, IDisposable
+    public class GrpcConnection : ClientConnection, IDisposable
     {
         private readonly AddressResolver _resolver;
-
+        private readonly ILoggerFactory _loggerFactory;
         internal LoadBalancer? _balancer;
         private IDisposable? _resolverSubscription;
+        private List<SubConnection> _subConnections;
+
+        public IList<SubConnection> GetSubConnections()
+        {
+            lock (_subConnections)
+            {
+                return _subConnections.ToArray();
+            }
+        }
 
         public GrpcConnection(AddressResolver resolver, ILoggerFactory loggerFactory) : base(loggerFactory)
         {
+            _subConnections = new List<SubConnection>();
             _resolver = resolver;
+            _loggerFactory = loggerFactory;
         }
 
         public void ConfigureBalancer(Func<GrpcConnection, LoadBalancer> configure)
@@ -51,12 +63,25 @@ namespace Grpc.Net.Client.Balancer
 
             Logger.LogInformation("Created sub-connection: " + subConnection);
 
+            lock (_subConnections)
+            {
+                _subConnections.Add(subConnection);
+            }
+
             return subConnection;
         }
 
         public override void RemoveSubConnection(SubConnection subConnection)
         {
             Logger.LogInformation("Removing sub-connection: " + subConnection);
+
+            lock (_subConnections)
+            {
+                var removed = _subConnections.Remove(subConnection);
+                Debug.Assert(removed);
+            }
+
+            subConnection.Shutdown();
         }
 
         public override Task ResolveNowAsync(CancellationToken cancellationToken)
@@ -98,7 +123,7 @@ namespace Grpc.Net.Client.Balancer
                 // Default to PickFirstBalancer
                 if (_balancer == null)
                 {
-                    _balancer = new PickFirstBalancer(this);
+                    _balancer = new PickFirstBalancer(this, _loggerFactory);
                 }
 
                 _resolverSubscription = _resolver.Subscribe(new ResolverObserver(this));

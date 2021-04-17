@@ -40,6 +40,7 @@ namespace Grpc.Net.Client.Balancer
         private readonly SemaphoreSlim _connectionCreateLock;
         internal readonly List<(DnsEndPoint EndPoint, Socket Socket, Stream? Stream)> _activeTransports;
         private readonly object _lock;
+        private readonly Timer _socketConnectedTimer;
 
         private Socket? _initialSocket;
         private DnsEndPoint? _currentEndPoint;
@@ -59,14 +60,20 @@ namespace Grpc.Net.Client.Balancer
             _connection = connection;
             _connectionCreateLock = new SemaphoreSlim(1);
             _activeTransports = new List<(DnsEndPoint, Socket, Stream?)>();
+            _socketConnectedTimer = new Timer(OnSocketConnected, state: null, Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
         }
 
         public void UpdateAddresses(IReadOnlyList<DnsEndPoint> addresses)
         {
-            _addresses.Clear();
-            _addresses.AddRange(addresses);
+            var connect = false;
+            lock (_lock)
+            {
+                _addresses.Clear();
+                _addresses.AddRange(addresses);
 
-            if (CurrentEndPoint != null && !_addresses.Contains(CurrentEndPoint))
+                connect = (CurrentEndPoint != null && !_addresses.Contains(CurrentEndPoint));
+            }
+            if (connect)
             {
                 _ = ConnectAsync(CancellationToken.None);
             }
@@ -146,15 +153,22 @@ namespace Grpc.Net.Client.Balancer
 
                 UpdateConnectivityState(ConnectivityState.Connecting);
 
-                _currentEndPoint = await TryConnectAsync(cancellationToken).ConfigureAwait(false);
-                if (_currentEndPoint != null)
+                var r = await TryConnectAsync(cancellationToken).ConfigureAwait(false);
+                if (r != null)
                 {
+                    var result = r.GetValueOrDefault();
+                    lock (_lock)
+                    {
+                        _initialSocket = result.Socket;
+                        _currentEndPoint = result.EndPoint;
+                        _socketConnectedTimer.Change(TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5));
+                    }
                     return;
                 }
             }
         }
 
-        public async ValueTask<DnsEndPoint?> TryConnectAsync(CancellationToken cancellationToken)
+        private async ValueTask<(DnsEndPoint EndPoint, Socket Socket)?> TryConnectAsync(CancellationToken cancellationToken)
         {
             Debug.Assert(_addresses.Count > 0);
             Debug.Assert(CurrentEndPoint == null);
@@ -178,10 +192,9 @@ namespace Grpc.Net.Client.Balancer
                         await socket.ConnectAsync(currentEndPoint, cancellationToken).ConfigureAwait(false);
                         Logger.LogInformation("Connected: " + currentEndPoint);
 
-                        _initialSocket = socket;
 
                         UpdateConnectivityState(ConnectivityState.Ready);
-                        return currentEndPoint;
+                        return (currentEndPoint, socket);
                     }
                     catch (Exception ex)
                     {
@@ -196,11 +209,47 @@ namespace Grpc.Net.Client.Balancer
 
                 // All connections failed
                 UpdateConnectivityState(ConnectivityState.TransientFailure);
+                _socketConnectedTimer.Change(TimeSpan.Zero, TimeSpan.Zero);
                 throw new InvalidOperationException("All connections failed.", firstConnectionError);
             }
             finally
             {
                 _connectionCreateLock.Release();
+            }
+        }
+
+        private async void OnSocketConnected(object? state)
+        {
+            try
+            {
+                var socket = _initialSocket;
+                if (socket != null)
+                {
+                    try
+                    {
+                        _connection.Logger.LogTrace("Pinging socket.");
+                        await socket.SendAsync(Array.Empty<byte>(), SocketFlags.None).ConfigureAwait(false);
+                        _connection.Logger.LogTrace("Successfully socket.");
+                    }
+                    catch (Exception ex)
+                    {
+                        _connection.Logger.LogTrace(ex, "Error when pinging socket.");
+
+                        lock (_lock)
+                        {
+                            if (_initialSocket == socket)
+                            {
+                                _initialSocket = null;
+                                _currentEndPoint = null;
+                                UpdateConnectivityState(ConnectivityState.Idle);
+                            }
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _connection.Logger.LogError(ex, "Error when checking socket.");
             }
         }
 
@@ -215,6 +264,18 @@ namespace Grpc.Net.Client.Balancer
                 {
                     socket = _initialSocket;
                     _initialSocket = null;
+                }
+            }
+
+            // Check to see if we've received anything on the connection; if we have, that's
+            // either erroneous data (we shouldn't have received anything yet) or the connection
+            // has been closed; either way, we can't use it.
+            if (socket != null)
+            {
+                if (!CanUseSocket(socket))
+                {
+                    socket.Dispose();
+                    socket = null;
                 }
             }
 
@@ -236,6 +297,18 @@ namespace Grpc.Net.Client.Balancer
             return stream;
         }
 
+        private static bool CanUseSocket(Socket socket)
+        {
+            try
+            {
+                return !socket.Poll(0, SelectMode.SelectRead);
+            }
+            catch (Exception e) when (e is SocketException || e is ObjectDisposedException)
+            {
+                return false;
+            }
+        }
+
         private void OnStreamDisposed(Stream streamWrapper)
         {
             lock (_lock)
@@ -251,6 +324,7 @@ namespace Grpc.Net.Client.Balancer
                         if (_activeTransports.Count == 0)
                         {
                             _currentEndPoint = null;
+                            _socketConnectedTimer.Change(TimeSpan.Zero, TimeSpan.Zero);
                             UpdateConnectivityState(ConnectivityState.Idle);
                         }
 
@@ -263,6 +337,16 @@ namespace Grpc.Net.Client.Balancer
         public override string ToString()
         {
             return string.Join(", ", _addresses);
+        }
+
+        public override IList<DnsEndPoint> GetAddresses()
+        {
+            return _addresses.ToArray();
+        }
+
+        public override void Shutdown()
+        {
+            _socketConnectedTimer.Dispose();
         }
     }
 }

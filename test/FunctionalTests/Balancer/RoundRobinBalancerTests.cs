@@ -68,12 +68,12 @@ namespace Grpc.Net.Client.Tests.Balancer
             using var endpoint = BalancerHelpers.CreateGrpcEndpoint<HelloRequest, HelloReply>(50150, UnaryMethod, nameof(UnaryMethod));
 
             var grpcConnection = new GrpcConnection(new StaticAddressResolver(new[] { new DnsEndPoint(endpoint.Address.Host, endpoint.Address.Port) }), LoggerFactory);
-            grpcConnection.ConfigureBalancer(c => new RoundRobinBalancer(c));
+            grpcConnection.ConfigureBalancer(c => new RoundRobinBalancer(c, LoggerFactory));
 
             var channel = GrpcChannel.ForAddress(endpoint.Address, new GrpcChannelOptions
             {
                 LoggerFactory = LoggerFactory,
-                HttpHandler = new BalancerHttpHandler(new SocketsHttpHandler(), grpcConnection)
+                HttpHandler = BalancerHelpers.CreateBalancerHandler(grpcConnection, LoggerFactory)
             });
 
             var client = TestClientFactory.Create(channel, endpoint.Method);
@@ -122,7 +122,7 @@ namespace Grpc.Net.Client.Tests.Balancer
                 new DnsEndPoint(endpoint1.Address.Host, endpoint1.Address.Port),
                 new DnsEndPoint(endpoint2.Address.Host, endpoint2.Address.Port)
             }), LoggerFactory);
-            grpcConnection.ConfigureBalancer(c => new RoundRobinBalancer(c, new TestRandomGenerator()));
+            grpcConnection.ConfigureBalancer(c => new RoundRobinBalancer(c, LoggerFactory, new TestRandomGenerator()));
 
             await grpcConnection.ConnectAsync(CancellationToken.None);
             await TestHelpers.AssertIsTrueRetryAsync(() =>
@@ -134,7 +134,7 @@ namespace Grpc.Net.Client.Tests.Balancer
             var channel = GrpcChannel.ForAddress(endpoint1.Address, new GrpcChannelOptions
             {
                 LoggerFactory = LoggerFactory,
-                HttpHandler = new BalancerHttpHandler(new SocketsHttpHandler(), grpcConnection)
+                HttpHandler = BalancerHelpers.CreateBalancerHandler(grpcConnection, LoggerFactory)
             });
 
             var client = TestClientFactory.Create(channel, endpoint1.Method);
@@ -188,7 +188,7 @@ namespace Grpc.Net.Client.Tests.Balancer
             var channel = GrpcChannel.ForAddress(endpoint1.Address, new GrpcChannelOptions
             {
                 LoggerFactory = LoggerFactory,
-                HttpHandler = new BalancerHttpHandler(new SocketsHttpHandler(), grpcConnection)
+                HttpHandler = BalancerHelpers.CreateBalancerHandler(grpcConnection, LoggerFactory)
             });
 
             var client = TestClientFactory.Create(channel, endpoint1.Method);

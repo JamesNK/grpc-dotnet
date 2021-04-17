@@ -20,10 +20,12 @@
 
 using System;
 using System.IO;
+using System.Net.Http;
 using FunctionalTestsWebsite;
 using Google.Protobuf;
 using Grpc.AspNetCore.FunctionalTests.Infrastructure;
 using Grpc.Core;
+using Grpc.Net.Client.Balancer;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.Extensions.Logging;
@@ -95,6 +97,13 @@ namespace Grpc.Net.Client.Tests.Balancer
                     });
                 },
                 endpointName);
+        }
+
+        public static BalancerHttpHandler CreateBalancerHandler(GrpcConnection grpcConnection, ILoggerFactory loggerFactory, HttpMessageHandler? innerHandler = null)
+        {
+            return new BalancerHttpHandler(
+                innerHandler ?? new SocketsHttpHandler { EnableMultipleHttp2Connections = true },
+                grpcConnection);
         }
     }
 }

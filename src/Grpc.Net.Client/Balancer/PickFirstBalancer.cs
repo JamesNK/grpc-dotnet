@@ -32,10 +32,10 @@ namespace Grpc.Net.Client.Balancer
         internal SubConnection? _subConnection;
         private ILogger _logger;
 
-        public PickFirstBalancer(ClientConnection connection)
+        public PickFirstBalancer(ClientConnection connection, ILoggerFactory loggerFactory)
         {
             _connection = connection;
-            _logger = _connection.LoggerFactory.CreateLogger<PickFirstBalancer>();
+            _logger = loggerFactory.CreateLogger<PickFirstBalancer>();
         }
 
         public override void Close()
@@ -100,7 +100,7 @@ namespace Grpc.Net.Client.Balancer
                     _connection.UpdateState(new BalancerState(_connection.State, new PickFirstPicker(_subConnection)));
                     break;
                 case ConnectivityState.Connecting:
-                    _connection.UpdateState(new BalancerState(ConnectivityState.Connecting, new FailurePicker(new Exception())));
+                    _connection.UpdateState(new BalancerState(ConnectivityState.Connecting, EmptyPicker.Instance));
                     break;
                 case ConnectivityState.TransientFailure:
                     _connection.UpdateState(new BalancerState(ConnectivityState.TransientFailure, new FailurePicker(state.ConnectionError!)));

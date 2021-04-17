@@ -5,7 +5,7 @@ metadata:
   labels:
     app: grpc-dotnet-container
 spec:
-  replicas: 1
+  replicas: 2
   selector:
     matchLabels:
       service: server
@@ -38,6 +38,7 @@ metadata:
     app: grpc-dotnet-container
     service: server
 spec:
+  clusterIP: None # Headless service
   ports:
     - port: 80
       targetPort: 80

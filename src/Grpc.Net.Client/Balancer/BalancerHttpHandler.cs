@@ -28,7 +28,7 @@ using Grpc.Shared;
 
 namespace Grpc.Net.Client.Balancer
 {
-    internal class BalancerHttpHandler : DelegatingHandler
+    public class BalancerHttpHandler : DelegatingHandler
     {
         private readonly ClientConnection _clientConnection;
         private static readonly HttpRequestOptionsKey<SubConnection> _requestOptionsSubConnectionKey = new HttpRequestOptionsKey<SubConnection>(nameof(SubConnection));

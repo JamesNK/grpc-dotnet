@@ -1,6 +1,9 @@
 ﻿@page "/fetchdata"
 @inject GrpcChannel Channel
+@inject Grpc.Net.Client.Balancer.GrpcConnection Connection
+@inject ILoggerFactory LoggerFactory
 @using Google.Protobuf.WellKnownTypes
+@using Microsoft.Extensions.Logging
 
 <h1>Weather forecast</h1>
 
@@ -33,21 +36,122 @@ else
             }
         </tbody>
     </table>
+    <p>
+        Weather forecast data loaded from <strong>@server</strong> <button class="btn btn-primary btn-sm" @onclick="LoadDataAsync">Reload</button>
+    </p>
 }
 
-<div>
-    <img src="/grpc-logo.png" alt="gRPC logo" />
-    <p>
-        Data fetched from a gRPC service.
-    </p>
-</div>
+@if (subConnections != null)
+{
+    <h3>Connection <span class="badge @GetStateClass(connectionState) badge-pill">@connectionState</span></h3>
+
+    <div class="row">
+        <div class="col-4">
+            <ul class="list-group">
+                @foreach (var subConnection in subConnections)
+                {
+                    <li class="list-group-item d-flex justify-content-between align-items-center">
+                        @string.Join(", ", subConnection.GetAddresses().Select(FormatAddress))
+                        <span class="badge @GetStateClass(subConnection.State) badge-pill">@subConnection.State</span>
+                    </li>
+                }
+            </ul>
+        </div>
+    </div>
+}
+
+@if (error != null)
+{
+    <pre>@error</pre>
+}
 
 @code {
     private IList<WeatherForecast>? forecasts;
+    private IList<Grpc.Net.Client.Balancer.SubConnection> subConnections = default!;
+    private Grpc.Net.Client.Balancer.ConnectivityState connectionState;
+    private CancellationTokenSource cts = default!;
+    private string? server;
+    private string? error;
+    private ILogger logger = default!;
+
+    private string GetStateClass(Grpc.Net.Client.Balancer.ConnectivityState state)
+    {
+        switch (state)
+        {
+            case Grpc.Net.Client.Balancer.ConnectivityState.Idle:
+                return "badge-primary";
+            case Grpc.Net.Client.Balancer.ConnectivityState.Connecting:
+                return "badge-warning";
+            case Grpc.Net.Client.Balancer.ConnectivityState.Ready:
+                return "badge-success";
+            case Grpc.Net.Client.Balancer.ConnectivityState.TransientFailure:
+                return "badge-danger";
+            case Grpc.Net.Client.Balancer.ConnectivityState.Shutdown:
+                return "badge-secondary";
+            default:
+                return "badge-primary";
+        }
+    }
 
     protected override async Task OnInitializedAsync()
     {
-        var client = new WeatherForecasts.WeatherForecastsClient(Channel);
-        forecasts = (await client.GetWeatherForecastsAsync(new Empty())).Forecasts;
+        logger = LoggerFactory.CreateLogger(GetType());
+
+        cts = new CancellationTokenSource();
+        _ = RefreshConnectionState(cts.Token);
+
+        await LoadDataAsync();
+    }
+
+    public void Dispose()
+    {
+        cts.Cancel();
+        cts.Dispose();
+    }
+
+    private async Task RefreshConnectionState(CancellationToken cancellationToken)
+    {
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            await InvokeAsync(() =>
+            {
+                connectionState = Connection.State;
+                subConnections = Connection.GetSubConnections();
+                StateHasChanged();
+            });
+
+            await Task.Delay(TimeSpan.FromSeconds(0.5));
+        }
+    }
+
+    private async Task LoadDataAsync()
+    {
+        error = null;
+        try
+        {
+            logger.LogInformation("Loading data");
+
+            var client = new WeatherForecasts.WeatherForecastsClient(Channel);
+            var call = client.GetWeatherForecastsAsync(new Empty());
+
+            var responseHeaders = await call.ResponseHeadersAsync;
+            server = responseHeaders.GetValue("host");
+
+            forecasts = (await call).Forecasts;
+        }
+        catch (Exception ex)
+        {
+            error = ex.ToString();
+        }
+    }
+
+    private string FormatAddress(System.Net.DnsEndPoint a)
+    {
+        var value = $"http://{a.Host}";
+        if (a.Port != 80)
+        {
+            value += ":" + a.Port;
+        }
+        return value;
     }
 }

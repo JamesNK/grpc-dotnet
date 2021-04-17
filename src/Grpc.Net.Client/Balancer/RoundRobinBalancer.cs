@@ -38,16 +38,16 @@ namespace Grpc.Net.Client.Balancer
         private readonly List<(DnsEndPoint Address, SubConnection SubConnection)> _subConnections;
         private ILogger _logger;
 
-        public RoundRobinBalancer(ClientConnection connection) : this(connection, new RandomGenerator())
+        public RoundRobinBalancer(ClientConnection connection, ILoggerFactory loggerFactory) : this(connection, loggerFactory, new RandomGenerator())
         {
         }
 
-        internal RoundRobinBalancer(ClientConnection connection, IRandomGenerator randomGenerator)
+        internal RoundRobinBalancer(ClientConnection connection, ILoggerFactory loggerFactory, IRandomGenerator randomGenerator)
         {
             _subConnections = new List<(DnsEndPoint Address, SubConnection SubConnection)>();
             _connection = connection;
             _randomGenerator = randomGenerator;
-            _logger = _connection.LoggerFactory.CreateLogger<PickFirstBalancer>();
+            _logger = loggerFactory.CreateLogger<PickFirstBalancer>();
         }
 
         public override void Close()
@@ -126,7 +126,17 @@ namespace Grpc.Net.Client.Balancer
                 allUpdatedSubConnections.Add(newSubConnection);
             }
 
-            foreach (var removedSubConnection in _subConnections)
+            // Any sub-connections still in this collection are no longer returned by the resolver.
+            // This can all be removed.
+            var removedSubConnections = currentSubConnections;
+
+            if (removedSubConnections.Count == 0 && newSubConnections.Count == 0)
+            {
+                _logger.LogTrace("Connections unchanged.");
+                return;
+            }
+
+            foreach (var removedSubConnection in removedSubConnections)
             {
                 _connection.RemoveSubConnection(removedSubConnection.SubConnection);
             }
