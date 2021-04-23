@@ -108,6 +108,8 @@ namespace Grpc.Net.Client.Balancer
 
             if (result.SubConnection.CurrentEndPoint == null)
             {
+                // For some reason the returned sub-connection doesn't have a current endpoint.
+                // Connect the subconnection to get 
                 await result.SubConnection.ConnectAsync(cancellationToken).ConfigureAwait(false);
             }
 

@@ -32,6 +32,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Grpc.Net.Client.Internal.Retry;
 using System.Threading;
 using System.Diagnostics;
+using Grpc.Net.Client.Balancer;
 
 namespace Grpc.Net.Client
 {
@@ -71,6 +72,9 @@ namespace Grpc.Net.Client
         internal Dictionary<string, ICompressionProvider> CompressionProviders { get; }
         internal string MessageAcceptEncoding { get; }
         internal bool Disposed { get; private set; }
+
+        // Load balancing
+        internal AddressResolver? _addressResolver;
 
         // Stateful
         internal ChannelRetryThrottling? RetryThrottling { get; }
@@ -127,6 +131,10 @@ namespace Grpc.Net.Client
 
                 ValidateChannelCredentials();
             }
+
+            (IEnumerable<AddressResolverFactory>)channelOptions.ServiceProvider.GetService(typeof(IEnumerable<AddressResolverFactory>));
+
+            if (Address.Scheme)
 
             if (!string.IsNullOrEmpty(Address.PathAndQuery) && Address.PathAndQuery != "/")
             {

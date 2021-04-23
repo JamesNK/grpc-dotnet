@@ -191,6 +191,11 @@ namespace Grpc.Net.Client
         public ServiceConfig? ServiceConfig { get; set; }
 
         /// <summary>
+        /// TODO
+        /// </summary>
+        public IServiceProvider? ServiceProvider { get; set; }
+
+        /// <summary>
         /// Initializes a new instance of the <see cref="GrpcChannelOptions"/> class.
         /// </summary>
         public GrpcChannelOptions()

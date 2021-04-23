@@ -144,6 +144,23 @@ namespace Grpc.Net.Client.Balancer
             }
         }
     }
+
+    public class DnsAddressResolverFactory : AddressResolverFactory
+    {
+        private readonly ILoggerFactory _loggerFactory;
+
+        public DnsAddressResolverFactory(ILoggerFactory loggerFactory)
+        {
+            _loggerFactory = loggerFactory;
+        }
+
+        public override string Name => "dns";
+
+        public override AddressResolver Create(Uri address, AddressResolverOptions options)
+        {
+            return new DnsAddressResolver(address, _loggerFactory);
+        }
+    }
 }
 
 #pragma warning restore CS1591 // Missing XML comment for publicly visible type or member
