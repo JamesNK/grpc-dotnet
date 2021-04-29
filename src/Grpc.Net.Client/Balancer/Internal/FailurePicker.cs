@@ -23,7 +23,7 @@ using System;
 
 namespace Grpc.Net.Client.Balancer.Internal
 {
-    public class FailurePicker : SubConnectionPicker
+    public class FailurePicker : SubChannelPicker
     {
         private readonly Exception _exception;
 

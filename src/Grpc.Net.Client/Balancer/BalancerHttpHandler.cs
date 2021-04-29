@@ -16,7 +16,7 @@
 
 #endregion
 
-#if NET5_0_OR_GREATER
+#if HAVE_LOAD_BALANCING
 #pragma warning disable CS1591 // Missing XML comment for publicly visible type or member
 
 using System;
@@ -30,10 +30,10 @@ namespace Grpc.Net.Client.Balancer
 {
     public class BalancerHttpHandler : DelegatingHandler
     {
-        private readonly ClientConnection _clientConnection;
-        private static readonly HttpRequestOptionsKey<SubConnection> _requestOptionsSubConnectionKey = new HttpRequestOptionsKey<SubConnection>(nameof(SubConnection));
+        private readonly ClientChannel _clientConnection;
+        private static readonly HttpRequestOptionsKey<SubChannel> _requestOptionsSubConnectionKey = new HttpRequestOptionsKey<SubChannel>(nameof(SubChannel));
 
-        public BalancerHttpHandler(HttpMessageHandler innerHandler, ClientConnection clientConnection)
+        public BalancerHttpHandler(HttpMessageHandler innerHandler, ClientChannel clientConnection)
             : base(innerHandler)
         {
             _clientConnection = clientConnection;
@@ -65,13 +65,13 @@ namespace Grpc.Net.Client.Balancer
 
             // Update request host.
             var uriBuilder = new UriBuilder(request.RequestUri!);
-            uriBuilder.Host = result.SubConnection!.CurrentEndPoint!.Host;
-            uriBuilder.Port = result.SubConnection!.CurrentEndPoint!.Port;
+            uriBuilder.Host = result.SubChannel!.CurrentEndPoint!.Host;
+            uriBuilder.Port = result.SubChannel!.CurrentEndPoint!.Port;
             request.RequestUri = uriBuilder.Uri;
 
             // Set sub-connection onto request.
             // Will be used to get a stream in SocketsHttpHandler.ConnectCallback.
-            request.Options.Set(_requestOptionsSubConnectionKey, result.SubConnection);
+            request.Options.Set(_requestOptionsSubConnectionKey, result.SubChannel);
 
             return await base.SendAsync(request, cancellationToken).ConfigureAwait(false);
         }

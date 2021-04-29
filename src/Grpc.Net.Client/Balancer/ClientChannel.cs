@@ -16,7 +16,7 @@
 
 #endregion
 
-#if NET5_0_OR_GREATER
+#if HAVE_LOAD_BALANCING
 #pragma warning disable CS1591 // Missing XML comment for publicly visible type or member
 
 using System.Collections.Generic;
@@ -30,21 +30,21 @@ using Microsoft.Extensions.Logging;
 
 namespace Grpc.Net.Client.Balancer
 {
-    public abstract class ClientConnection
+    public abstract class ClientChannel
     {
         private ConnectivityState _state;
 
         // Internal for testing
-        internal SubConnectionPicker? _picker;
-        private TaskCompletionSource<SubConnectionPicker> _nextPickerTcs;
+        internal SubChannelPicker? _picker;
+        private TaskCompletionSource<SubChannelPicker> _nextPickerTcs;
         private readonly SemaphoreSlim _nextPickerLock;
         private readonly object _lock;
 
-        protected ClientConnection(ILoggerFactory loggerFactory)
+        protected ClientChannel(ILoggerFactory loggerFactory)
         {
             _lock = new object();
             _nextPickerLock = new SemaphoreSlim(1);
-            _nextPickerTcs = new TaskCompletionSource<SubConnectionPicker>(TaskCreationOptions.RunContinuationsAsynchronously);
+            _nextPickerTcs = new TaskCompletionSource<SubChannelPicker>(TaskCreationOptions.RunContinuationsAsynchronously);
 
             Logger = loggerFactory.CreateLogger(GetType());
         }
@@ -52,9 +52,9 @@ namespace Grpc.Net.Client.Balancer
         public ConnectivityState State => _state;
 
         public ILogger Logger { get; }
-        public abstract SubConnection CreateSubConnection(SubConnectionOptions options);
-        public abstract void RemoveSubConnection(SubConnection subConnection);
-        public abstract void UpdateAddresses(SubConnection subConnection, IReadOnlyList<DnsEndPoint> addresses);
+        public abstract SubChannel CreateSubChannel(SubChannelOptions options);
+        public abstract void RemoveSubChannel(SubChannel subChannel);
+        public abstract void UpdateAddresses(SubChannel subChannel, IReadOnlyList<DnsEndPoint> addresses);
         public abstract Task ResolveNowAsync(CancellationToken cancellationToken);
         public abstract Task ConnectAsync(CancellationToken cancellationToken);
 
@@ -64,7 +64,7 @@ namespace Grpc.Net.Client.Balancer
             {
                 if (_state != state.ConnectivityState)
                 {
-                    Logger.LogInformation("Connection state updated: " + state.ConnectivityState);
+                    Logger.LogInformation("Channel state updated: " + state.ConnectivityState);
                     _state = state.ConnectivityState;
                 }
 
@@ -80,7 +80,7 @@ namespace Grpc.Net.Client.Balancer
         public async ValueTask<PickResult> PickAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             var context = new PickContext(request);
-            SubConnectionPicker? previousPicker = null;
+            SubChannelPicker? previousPicker = null;
 
             PickResult result;
 
@@ -93,30 +93,30 @@ namespace Grpc.Net.Client.Balancer
 
                 result = currentPicker.Pick(context);
 
-                if (result.SubConnection != null)
+                if (result.SubChannel != null)
                 {
                     break;
                 }
                 else
                 {
-                    Logger.LogInformation("Current picker doesn't have a ready connection");
+                    Logger.LogInformation("Current picker doesn't have a ready sub-channel");
                     previousPicker = currentPicker;
                 }
             }
 
-            Logger.LogInformation("Successfully picked sub-connection: " + result.SubConnection);
+            Logger.LogInformation("Successfully picked sub-channel: " + result.SubChannel);
 
-            if (result.SubConnection.CurrentEndPoint == null)
+            if (result.SubChannel.CurrentEndPoint == null)
             {
-                // For some reason the returned sub-connection doesn't have a current endpoint.
-                // Connect the subconnection to get 
-                await result.SubConnection.ConnectAsync(cancellationToken).ConfigureAwait(false);
+                // For some reason the returned sub-channel doesn't have a current endpoint.
+                // Connect the sub-channel to get 
+                await result.SubChannel.ConnectAsync(cancellationToken).ConfigureAwait(false);
             }
 
             return result;
         }
 
-        private ValueTask<SubConnectionPicker> GetPickerAsync(SubConnectionPicker? currentPicker, CancellationToken cancellationToken)
+        private ValueTask<SubChannelPicker> GetPickerAsync(SubChannelPicker? currentPicker, CancellationToken cancellationToken)
         {
             lock (_lock)
             {
@@ -131,7 +131,7 @@ namespace Grpc.Net.Client.Balancer
             }
         }
 
-        private async ValueTask<SubConnectionPicker> GetNextPickerAsync(CancellationToken cancellationToken)
+        private async ValueTask<SubChannelPicker> GetNextPickerAsync(CancellationToken cancellationToken)
         {
             Logger.LogInformation("Waiting for valid picker");
 
@@ -146,7 +146,7 @@ namespace Grpc.Net.Client.Balancer
 
                 lock (_lock)
                 {
-                    _nextPickerTcs = new TaskCompletionSource<SubConnectionPicker>(TaskCreationOptions.RunContinuationsAsynchronously);
+                    _nextPickerTcs = new TaskCompletionSource<SubChannelPicker>(TaskCreationOptions.RunContinuationsAsynchronously);
                 }
 
                 return nextPicker;

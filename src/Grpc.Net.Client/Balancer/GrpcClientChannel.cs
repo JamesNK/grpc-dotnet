@@ -24,64 +24,64 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
 
-#if NET5_0_OR_GREATER
+#if HAVE_LOAD_BALANCING
 #pragma warning disable CS1591 // Missing XML comment for publicly visible type or member
 
 namespace Grpc.Net.Client.Balancer
 {
-    public class GrpcConnection : ClientConnection, IDisposable
+    public class GrpcClientChannel : ClientChannel, IDisposable
     {
         private readonly AddressResolver _resolver;
         private readonly ILoggerFactory _loggerFactory;
         internal LoadBalancer? _balancer;
         private IDisposable? _resolverSubscription;
-        private List<SubConnection> _subConnections;
+        private List<SubChannel> _subChannels;
 
-        public IList<SubConnection> GetSubConnections()
+        public IList<SubChannel> GetSubConnections()
         {
-            lock (_subConnections)
+            lock (_subChannels)
             {
-                return _subConnections.ToArray();
+                return _subChannels.ToArray();
             }
         }
 
-        public GrpcConnection(AddressResolver resolver, ILoggerFactory loggerFactory) : base(loggerFactory)
+        public GrpcClientChannel(AddressResolver resolver, ILoggerFactory loggerFactory) : base(loggerFactory)
         {
-            _subConnections = new List<SubConnection>();
+            _subChannels = new List<SubChannel>();
             _resolver = resolver;
             _loggerFactory = loggerFactory;
         }
 
-        public void ConfigureBalancer(Func<GrpcConnection, LoadBalancer> configure)
+        public void ConfigureBalancer(Func<GrpcClientChannel, LoadBalancer> configure)
         {
             _balancer = configure(this);
         }
 
-        public override SubConnection CreateSubConnection(SubConnectionOptions options)
+        public override SubChannel CreateSubChannel(SubChannelOptions options)
         {
-            var subConnection = new GrpcSubConnection(this, options.Addresses);
+            var subConnection = new GrpcSubChannel(this, options.Addresses);
 
             Logger.LogInformation("Created sub-connection: " + subConnection);
 
-            lock (_subConnections)
+            lock (_subChannels)
             {
-                _subConnections.Add(subConnection);
+                _subChannels.Add(subConnection);
             }
 
             return subConnection;
         }
 
-        public override void RemoveSubConnection(SubConnection subConnection)
+        public override void RemoveSubChannel(SubChannel subChannel)
         {
-            Logger.LogInformation("Removing sub-connection: " + subConnection);
+            Logger.LogInformation("Removing sub-channel: " + subChannel);
 
-            lock (_subConnections)
+            lock (_subChannels)
             {
-                var removed = _subConnections.Remove(subConnection);
+                var removed = _subChannels.Remove(subChannel);
                 Debug.Assert(removed);
             }
 
-            subConnection.Shutdown();
+            subChannel.Shutdown();
         }
 
         public override Task ResolveNowAsync(CancellationToken cancellationToken)
@@ -89,9 +89,9 @@ namespace Grpc.Net.Client.Balancer
             return _resolver.RefreshAsync(cancellationToken);
         }
 
-        public override void UpdateAddresses(SubConnection subConnection, IReadOnlyList<DnsEndPoint> addresses)
+        public override void UpdateAddresses(SubChannel subConnection, IReadOnlyList<DnsEndPoint> addresses)
         {
-            ((GrpcSubConnection)subConnection).UpdateAddresses(addresses);
+            ((GrpcSubChannel)subConnection).UpdateAddresses(addresses);
         }
 
         private void OnResolverError(Exception error)
@@ -101,7 +101,7 @@ namespace Grpc.Net.Client.Balancer
 
         private void OnResolverResult(AddressResolverResult value)
         {
-            _balancer!.UpdateConnectionState(new ConnectionState(value, GrpcAttributes.Empty));
+            _balancer!.UpdateChannelState(new ChannelState(value, GrpcAttributes.Empty));
         }
 
         public void Dispose()
@@ -110,10 +110,10 @@ namespace Grpc.Net.Client.Balancer
             _balancer?.Dispose();
         }
 
-        internal void OnSubConnectionStateChange(GrpcSubConnection subConnection, ConnectivityState state)
+        internal void OnSubConnectionStateChange(GrpcSubChannel subConnection, ConnectivityState state)
         {
             Logger.LogInformation("Sub-connection state change: " + subConnection + " " + state);
-            _balancer!.UpdateSubConnectionState(subConnection, new SubConnectionState { ConnectivityState = state });
+            _balancer!.UpdateSubChannelState(subConnection, new SubChannelState { ConnectivityState = state });
         }
 
         public override Task ConnectAsync(CancellationToken cancellationToken)
@@ -134,11 +134,11 @@ namespace Grpc.Net.Client.Balancer
 
         private class ResolverObserver : IObserver<AddressResolverResult>
         {
-            private readonly GrpcConnection _connection;
+            private readonly GrpcClientChannel _channel;
 
-            public ResolverObserver(GrpcConnection connection)
+            public ResolverObserver(GrpcClientChannel channel)
             {
-                _connection = connection;
+                _channel = channel;
             }
 
             public void OnCompleted()
@@ -147,12 +147,12 @@ namespace Grpc.Net.Client.Balancer
 
             public void OnError(Exception error)
             {
-                _connection.OnResolverError(error);
+                _channel.OnResolverError(error);
             }
 
             public void OnNext(AddressResolverResult value)
             {
-                _connection.OnResolverResult(value);
+                _channel.OnResolverResult(value);
             }
         }
     }

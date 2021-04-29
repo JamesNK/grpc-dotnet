@@ -16,15 +16,24 @@
 
 #endregion
 
-#if NET5_0_OR_GREATER
+#if HAVE_LOAD_BALANCING
 #pragma warning disable CS1591 // Missing XML comment for publicly visible type or member
 
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Net;
 
 namespace Grpc.Net.Client.Balancer
 {
-    public abstract class SubConnectionPicker
+    public class SubChannelOptions
     {
-        public abstract PickResult Pick(PickContext context);
+        [DebuggerStepThrough]
+        public SubChannelOptions(IReadOnlyList<DnsEndPoint> addresses)
+        {
+            Addresses = addresses;
+        }
+
+        public IReadOnlyList<DnsEndPoint> Addresses { get; }
     }
 
 }

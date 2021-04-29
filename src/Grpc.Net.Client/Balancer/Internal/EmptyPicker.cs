@@ -23,7 +23,7 @@ using System;
 
 namespace Grpc.Net.Client.Balancer.Internal
 {
-    public class EmptyPicker : SubConnectionPicker
+    public class EmptyPicker : SubChannelPicker
     {
         public static readonly EmptyPicker Instance = new EmptyPicker();
 

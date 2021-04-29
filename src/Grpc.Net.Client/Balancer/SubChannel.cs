@@ -16,7 +16,7 @@
 
 #endregion
 
-#if NET5_0_OR_GREATER
+#if HAVE_LOAD_BALANCING
 #pragma warning disable CS1591 // Missing XML comment for publicly visible type or member
 
 using System;
@@ -38,7 +38,7 @@ using Microsoft.Extensions.Logging;
 
 namespace Grpc.Net.Client.Balancer
 {
-    public abstract class SubConnection
+    public abstract class SubChannel
     {
         public abstract ConnectivityState State { get; }
         public abstract IList<DnsEndPoint> GetAddresses();
@@ -51,26 +51,26 @@ namespace Grpc.Net.Client.Balancer
     public class BalancerState
     {
         [DebuggerStepThrough]
-        public BalancerState(ConnectivityState connectivityState, SubConnectionPicker picker)
+        public BalancerState(ConnectivityState connectivityState, SubChannelPicker picker)
         {
             ConnectivityState = connectivityState;
             Picker = picker;
         }
 
         public ConnectivityState ConnectivityState { get; }
-        public SubConnectionPicker Picker { get; }
+        public SubChannelPicker Picker { get; }
     }
 
-    public class SubConnectionState
+    public class SubChannelState
     {
         public ConnectivityState ConnectivityState { get; set; }
         public Exception? ConnectionError { get; set; }
     }
 
-    public class ConnectionState
+    public class ChannelState
     {
         [DebuggerStepThrough]
-        public ConnectionState(AddressResolverResult resolverState, GrpcAttributes options)
+        public ChannelState(AddressResolverResult resolverState, GrpcAttributes options)
         {
             ResolverState = resolverState;
             Options = options;
@@ -105,13 +105,13 @@ namespace Grpc.Net.Client.Balancer
         private readonly Action<CompleteContext>? _onComplete;
 
         [DebuggerStepThrough]
-        public PickResult(SubConnection? subConnection, Action<CompleteContext>? onComplete)
+        public PickResult(SubChannel? subChannel, Action<CompleteContext>? onComplete)
         {
-            SubConnection = subConnection;
+            SubChannel = subChannel;
             _onComplete = onComplete;
         }
 
-        public SubConnection? SubConnection { get; }
+        public SubChannel? SubChannel { get; }
 
         public void Complete(CompleteContext context)
         {

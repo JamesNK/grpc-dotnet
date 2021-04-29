@@ -29,6 +29,10 @@ using NUnit.Framework;
 using Microsoft.Extensions.Logging.Testing;
 using System.Linq;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.DependencyInjection;
+#if HAVE_LOAD_BALANCING
+using Grpc.Net.Client.Balancer;
+#endif
 
 namespace Grpc.Net.Client.Tests
 {
@@ -388,6 +392,83 @@ namespace Grpc.Net.Client.Tests
             Assert.IsTrue(channel.Disposed);
             Assert.AreEqual(0, channel.ActiveCalls.Count);
         }
+
+#if HAVE_LOAD_BALANCING
+        [Test]
+        public void AddressResolver_MatchInServiceProvider_Success()
+        {
+            // Arrange
+            var services = new ServiceCollection();
+            services.AddSingleton<AddressResolverFactory, TestAddressResolverFactory>();
+
+            var channelOptions = new GrpcChannelOptions
+            {
+                ServiceProvider = services.BuildServiceProvider()
+            };
+
+            // Act
+            var channel = GrpcChannel.ForAddress("test://localhost", channelOptions);
+
+            // Assert
+            Assert.IsInstanceOf(typeof(TestAddressResolver), channel.AddressResolver);
+        }
+
+        [Test]
+        public void AddressResolver_NoMatchInServiceProvider_Error()
+        {
+            // Arrange
+            var services = new ServiceCollection();
+
+            var channelOptions = new GrpcChannelOptions
+            {
+                ServiceProvider = services.BuildServiceProvider()
+            };
+
+            // Act
+            var ex = Assert.Throws<InvalidOperationException>(() => GrpcChannel.ForAddress("test://localhost", channelOptions))!;
+
+            // Assert
+            Assert.AreEqual("No address resolver configured for the scheme 'test'.", ex.Message);
+        }
+
+        [Test]
+        public void AddressResolver_NoServiceProvider_Error()
+        {
+            // Arrange & Act
+            var ex = Assert.Throws<InvalidOperationException>(() => GrpcChannel.ForAddress("test://localhost"))!;
+
+            // Assert
+            Assert.AreEqual("No address resolver configured for the scheme 'test'.", ex.Message);
+        }
+
+        public class TestAddressResolverFactory : AddressResolverFactory
+        {
+            public override string Name => "test";
+
+            public override AddressResolver Create(Uri address, AddressResolverOptions options)
+            {
+                return new TestAddressResolver();
+            }
+        }
+
+        public class TestAddressResolver : AddressResolver
+        {
+            public override Task RefreshAsync(CancellationToken cancellationToken)
+            {
+                throw new NotImplementedException();
+            }
+
+            public override void Shutdown()
+            {
+                throw new NotImplementedException();
+            }
+
+            public override IDisposable Subscribe(IObserver<AddressResolverResult> observer)
+            {
+                throw new NotImplementedException();
+            }
+        }
+#endif
 
         public class TestHttpMessageHandler : HttpMessageHandler
         {

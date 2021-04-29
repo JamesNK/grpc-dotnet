@@ -16,7 +16,7 @@
 
 #endregion
 
-#if NET5_0_OR_GREATER
+#if HAVE_LOAD_BALANCING
 #pragma warning disable CS1591 // Missing XML comment for publicly visible type or member
 
 using System;
@@ -28,13 +28,13 @@ namespace Grpc.Net.Client.Balancer
 {
     public class PickFirstBalancer : LoadBalancer
     {
-        private readonly ClientConnection _connection;
-        internal SubConnection? _subConnection;
+        private readonly ClientChannel _channel;
+        internal SubChannel? _subChannel;
         private ILogger _logger;
 
-        public PickFirstBalancer(ClientConnection connection, ILoggerFactory loggerFactory)
+        public PickFirstBalancer(ClientChannel channel, ILoggerFactory loggerFactory)
         {
-            _connection = connection;
+            _channel = channel;
             _logger = loggerFactory.CreateLogger<PickFirstBalancer>();
         }
 
@@ -44,78 +44,78 @@ namespace Grpc.Net.Client.Balancer
 
         public override void ResolverError(Exception exception)
         {
-            switch (_connection.State)
+            switch (_channel.State)
             {
                 case ConnectivityState.Idle:
                 case ConnectivityState.Connecting:
                 case ConnectivityState.TransientFailure:
-                    _connection.UpdateState(new BalancerState(ConnectivityState.TransientFailure, new FailurePicker(exception)));
+                    _channel.UpdateState(new BalancerState(ConnectivityState.TransientFailure, new FailurePicker(exception)));
                     break;
             }
         }
 
-        public override void UpdateConnectionState(ConnectionState state)
+        public override void UpdateChannelState(ChannelState state)
         {
             if (state.ResolverState.Addresses.Count == 0)
             {
                 ResolverError(new InvalidOperationException("Resolver returned no addresses."));
             }
 
-            if (_subConnection == null)
+            if (_subChannel == null)
             {
                 try
                 {
-                    _subConnection = _connection.CreateSubConnection(new SubConnectionOptions(state.ResolverState.Addresses));
+                    _subChannel = _channel.CreateSubChannel(new SubChannelOptions(state.ResolverState.Addresses));
                 }
                 catch (Exception ex)
                 {
-                    _connection.UpdateState(new BalancerState(ConnectivityState.TransientFailure, new FailurePicker(ex)));
+                    _channel.UpdateState(new BalancerState(ConnectivityState.TransientFailure, new FailurePicker(ex)));
                     throw;
                 }
 
-                _connection.UpdateState(new BalancerState(ConnectivityState.Idle, new PickFirstPicker(_subConnection)));
+                _channel.UpdateState(new BalancerState(ConnectivityState.Idle, new PickFirstPicker(_subChannel)));
             }
             else
             {
-                _connection.UpdateAddresses(_subConnection, state.ResolverState.Addresses);
+                _channel.UpdateAddresses(_subChannel, state.ResolverState.Addresses);
             }
 
-            _ = _subConnection.ConnectAsync(CancellationToken.None);
+            _ = _subChannel.ConnectAsync(CancellationToken.None);
         }
 
-        public override void UpdateSubConnectionState(SubConnection subConnection, SubConnectionState state)
+        public override void UpdateSubChannelState(SubChannel subChannel, SubChannelState state)
         {
-            _logger.LogInformation("Updating sub-connection state.");
+            _logger.LogInformation("Updating sub-channel state.");
 
-            if (_subConnection != subConnection)
+            if (_subChannel != subChannel)
             {
-                _logger.LogInformation("Ignored state change because of unknown sub-connection.");
+                _logger.LogInformation("Ignored state change because of unknown sub-channel.");
                 return;
             }
 
-            switch (_connection.State)
+            switch (_channel.State)
             {
                 case ConnectivityState.Ready:
                 case ConnectivityState.Idle:
-                    _connection.UpdateState(new BalancerState(_connection.State, new PickFirstPicker(_subConnection)));
+                    _channel.UpdateState(new BalancerState(_channel.State, new PickFirstPicker(_subChannel)));
                     break;
                 case ConnectivityState.Connecting:
-                    _connection.UpdateState(new BalancerState(ConnectivityState.Connecting, EmptyPicker.Instance));
+                    _channel.UpdateState(new BalancerState(ConnectivityState.Connecting, EmptyPicker.Instance));
                     break;
                 case ConnectivityState.TransientFailure:
-                    _connection.UpdateState(new BalancerState(ConnectivityState.TransientFailure, new FailurePicker(state.ConnectionError!)));
+                    _channel.UpdateState(new BalancerState(ConnectivityState.TransientFailure, new FailurePicker(state.ConnectionError!)));
                     break;
                 case ConnectivityState.Shutdown:
-                    _subConnection = null;
+                    _subChannel = null;
                     break;
             }
         }
 
-        private class PickFirstPicker : SubConnectionPicker
+        private class PickFirstPicker : SubChannelPicker
         {
-            private readonly SubConnection _subConnection;
+            private readonly SubChannel _subConnection;
 
-            public PickFirstPicker(SubConnection subConnection)
+            public PickFirstPicker(SubChannel subConnection)
             {
                 _subConnection = subConnection;
             }

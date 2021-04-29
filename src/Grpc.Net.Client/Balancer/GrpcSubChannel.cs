@@ -16,7 +16,7 @@
 
 #endregion
 
-#if NET5_0_OR_GREATER
+#if HAVE_LOAD_BALANCING
 
 using System;
 using System.Collections.Generic;
@@ -33,10 +33,10 @@ using Microsoft.Extensions.Logging;
 
 namespace Grpc.Net.Client.Balancer
 {
-    internal class GrpcSubConnection : SubConnection
+    internal class GrpcSubChannel : SubChannel
     {
         private readonly List<DnsEndPoint> _addresses;
-        private readonly GrpcConnection _connection;
+        private readonly GrpcClientChannel _channel;
         private readonly SemaphoreSlim _connectionCreateLock;
         internal readonly List<(DnsEndPoint EndPoint, Socket Socket, Stream? Stream)> _activeTransports;
         private readonly object _lock;
@@ -49,15 +49,15 @@ namespace Grpc.Net.Client.Balancer
 
         public override DnsEndPoint? CurrentEndPoint => _currentEndPoint;
         public IReadOnlyList<DnsEndPoint> Addresses => _addresses;
-        public ILogger Logger => _connection.Logger;
+        public ILogger Logger => _channel.Logger;
 
         public override ConnectivityState State => _state;
 
-        public GrpcSubConnection(GrpcConnection connection, IReadOnlyList<DnsEndPoint> addresses)
+        public GrpcSubChannel(GrpcClientChannel channel, IReadOnlyList<DnsEndPoint> addresses)
         {
             _lock = new object();
             _addresses = addresses.ToList();
-            _connection = connection;
+            _channel = channel;
             _connectionCreateLock = new SemaphoreSlim(1);
             _activeTransports = new List<(DnsEndPoint, Socket, Stream?)>();
             _socketConnectedTimer = new Timer(OnSocketConnected, state: null, Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
@@ -102,7 +102,7 @@ namespace Grpc.Net.Client.Balancer
 
             if (_state == ConnectivityState.Shutdown)
             {
-                throw new InvalidOperationException("Sub-connection has been shutdown.");
+                throw new InvalidOperationException("Sub-channel has been shutdown.");
             }
 
             if (_state != ConnectivityState.Idle)
@@ -134,7 +134,7 @@ namespace Grpc.Net.Client.Balancer
                 return;
             }
             _state = state;
-            _connection.OnSubConnectionStateChange(this, _state);
+            _channel.OnSubConnectionStateChange(this, _state);
         }
 
         private async Task ResetTransportAsync(CancellationToken cancellationToken)
@@ -143,7 +143,7 @@ namespace Grpc.Net.Client.Balancer
             {
                 if (attempt > 0)
                 {
-                    await _connection.ResolveNowAsync(cancellationToken).ConfigureAwait(false);
+                    await _channel.ResolveNowAsync(cancellationToken).ConfigureAwait(false);
                 }
 
                 if (_state == ConnectivityState.Shutdown)
@@ -227,13 +227,13 @@ namespace Grpc.Net.Client.Balancer
                 {
                     try
                     {
-                        _connection.Logger.LogTrace("Pinging socket.");
+                        _channel.Logger.LogTrace("Pinging socket.");
                         await socket.SendAsync(Array.Empty<byte>(), SocketFlags.None).ConfigureAwait(false);
-                        _connection.Logger.LogTrace("Successfully socket.");
+                        _channel.Logger.LogTrace("Successfully socket.");
                     }
                     catch (Exception ex)
                     {
-                        _connection.Logger.LogTrace(ex, "Error when pinging socket.");
+                        _channel.Logger.LogTrace(ex, "Error when pinging socket.");
 
                         lock (_lock)
                         {
@@ -249,7 +249,7 @@ namespace Grpc.Net.Client.Balancer
             }
             catch (Exception ex)
             {
-                _connection.Logger.LogError(ex, "Error when checking socket.");
+                _channel.Logger.LogError(ex, "Error when checking socket.");
             }
         }
 

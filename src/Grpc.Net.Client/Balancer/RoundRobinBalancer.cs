@@ -16,7 +16,7 @@
 
 #endregion
 
-#if NET5_0_OR_GREATER
+#if HAVE_LOAD_BALANCING
 #pragma warning disable CS1591 // Missing XML comment for publicly visible type or member
 
 using System;
@@ -33,19 +33,19 @@ namespace Grpc.Net.Client.Balancer
 {
     public class RoundRobinBalancer : LoadBalancer
     {
-        private readonly ClientConnection _connection;
+        private readonly ClientChannel _channel;
         private readonly IRandomGenerator _randomGenerator;
-        private readonly List<(DnsEndPoint Address, SubConnection SubConnection)> _subConnections;
+        private readonly List<(DnsEndPoint Address, SubChannel SubChannel)> _subChannels;
         private ILogger _logger;
 
-        public RoundRobinBalancer(ClientConnection connection, ILoggerFactory loggerFactory) : this(connection, loggerFactory, new RandomGenerator())
+        public RoundRobinBalancer(ClientChannel channel, ILoggerFactory loggerFactory) : this(channel, loggerFactory, new RandomGenerator())
         {
         }
 
-        internal RoundRobinBalancer(ClientConnection connection, ILoggerFactory loggerFactory, IRandomGenerator randomGenerator)
+        internal RoundRobinBalancer(ClientChannel channel, ILoggerFactory loggerFactory, IRandomGenerator randomGenerator)
         {
-            _subConnections = new List<(DnsEndPoint Address, SubConnection SubConnection)>();
-            _connection = connection;
+            _subChannels = new List<(DnsEndPoint Address, SubChannel SubChannel)>();
+            _channel = channel;
             _randomGenerator = randomGenerator;
             _logger = loggerFactory.CreateLogger<PickFirstBalancer>();
         }
@@ -56,21 +56,21 @@ namespace Grpc.Net.Client.Balancer
 
         public override void ResolverError(Exception exception)
         {
-            switch (_connection.State)
+            switch (_channel.State)
             {
                 case ConnectivityState.Idle:
                 case ConnectivityState.Connecting:
                 case ConnectivityState.TransientFailure:
-                    _connection.UpdateState(new BalancerState(ConnectivityState.TransientFailure, new FailurePicker(exception)));
+                    _channel.UpdateState(new BalancerState(ConnectivityState.TransientFailure, new FailurePicker(exception)));
                     break;
             }
         }
 
-        private int? FindSubConnectionByAddress(List<(DnsEndPoint Address, SubConnection SubConnection)> subConnections, DnsEndPoint endPoint)
+        private int? FindSubChannelByAddress(List<(DnsEndPoint Address, SubChannel SubChannel)> subChannels, DnsEndPoint endPoint)
         {
-            for (var i = 0; i < subConnections.Count; i++)
+            for (var i = 0; i < subChannels.Count; i++)
             {
-                var s = subConnections[i];
+                var s = subChannels[i];
                 if (Equals(s.Address, endPoint))
                 {
                     return i;
@@ -80,12 +80,12 @@ namespace Grpc.Net.Client.Balancer
             return null;
         }
 
-        private int? FindSubConnection(List<(DnsEndPoint Address, SubConnection SubConnection)> subConnections, SubConnection subConnection)
+        private int? FindSubChannel(List<(DnsEndPoint Address, SubChannel SubChannel)> subChannels, SubChannel subChannel)
         {
-            for (var i = 0; i < subConnections.Count; i++)
+            for (var i = 0; i < subChannels.Count; i++)
             {
-                var s = subConnections[i];
-                if (Equals(s.SubConnection, subConnection))
+                var s = subChannels[i];
+                if (Equals(s.SubChannel, subChannel))
                 {
                     return i;
                 }
@@ -94,22 +94,22 @@ namespace Grpc.Net.Client.Balancer
             return null;
         }
 
-        public override void UpdateConnectionState(ConnectionState state)
+        public override void UpdateChannelState(ChannelState state)
         {
             if (state.ResolverState.Addresses.Count == 0)
             {
                 ResolverError(new InvalidOperationException("Resolver returned no addresses."));
             }
 
-            var allUpdatedSubConnections = new List<(DnsEndPoint Address, SubConnection SubConnection)>();
-            var newSubConnections = new List<SubConnection>();
-            var currentSubConnections = _subConnections.ToList();
+            var allUpdatedSubConnections = new List<(DnsEndPoint Address, SubChannel SubChannel)>();
+            var newSubConnections = new List<SubChannel>();
+            var currentSubConnections = _subChannels.ToList();
 
             foreach (var address in state.ResolverState.Addresses)
             {
-                var i = FindSubConnectionByAddress(currentSubConnections, address);
+                var i = FindSubChannelByAddress(currentSubConnections, address);
 
-                (DnsEndPoint, SubConnection) newSubConnection;
+                (DnsEndPoint, SubChannel) newSubConnection;
                 if (i != null)
                 {
                     newSubConnection = currentSubConnections[i.GetValueOrDefault()];
@@ -117,7 +117,7 @@ namespace Grpc.Net.Client.Balancer
                 }
                 else
                 {
-                    var c = _connection.CreateSubConnection(new SubConnectionOptions(new[] { address }));
+                    var c = _channel.CreateSubChannel(new SubChannelOptions(new[] { address }));
 
                     newSubConnections.Add(c);
                     newSubConnection = (address, c);
@@ -138,11 +138,11 @@ namespace Grpc.Net.Client.Balancer
 
             foreach (var removedSubConnection in removedSubConnections)
             {
-                _connection.RemoveSubConnection(removedSubConnection.SubConnection);
+                _channel.RemoveSubChannel(removedSubConnection.SubChannel);
             }
 
-            _subConnections.Clear();
-            _subConnections.AddRange(allUpdatedSubConnections);
+            _subChannels.Clear();
+            _subChannels.AddRange(allUpdatedSubConnections);
 
             // Start new connections after collection on balancer has been updated.
             foreach (var c in newSubConnections)
@@ -155,15 +155,15 @@ namespace Grpc.Net.Client.Balancer
 
         private void UpdateBalancingState()
         {
-            var readySubConnections = _subConnections.Where(s => s.SubConnection.State == ConnectivityState.Ready).ToList();
-            if (readySubConnections.Count == 0)
+            var readySubChannels = _subChannels.Where(s => s.SubChannel.State == ConnectivityState.Ready).ToList();
+            if (readySubChannels.Count == 0)
             {
                 // No READY subchannels, determine aggregate state and error status
                 var isConnecting = false;
                 ConnectivityState? aggState = null;
-                foreach (var subConnection in _subConnections)
+                foreach (var subChannel in _subChannels)
                 {
-                    var state = subConnection.SubConnection.State;
+                    var state = subChannel.SubChannel.State;
 
                     if (state == ConnectivityState.Connecting || state == ConnectivityState.Idle)
                     {
@@ -177,36 +177,36 @@ namespace Grpc.Net.Client.Balancer
 
                 if (isConnecting)
                 {
-                    _connection.UpdateState(new BalancerState(ConnectivityState.Connecting, EmptyPicker.Instance));
+                    _channel.UpdateState(new BalancerState(ConnectivityState.Connecting, EmptyPicker.Instance));
                 }
                 else
                 {
-                    _connection.UpdateState(new BalancerState(ConnectivityState.TransientFailure, new FailurePicker(new Exception())));
+                    _channel.UpdateState(new BalancerState(ConnectivityState.TransientFailure, new FailurePicker(new Exception())));
                 }
             }
             else
             {
                 // Initialize the Picker to a random start index to ensure that a high frequency of Picker
                 // churn does not skew subchannel selection.
-                int pickCount = _randomGenerator.Next(0, readySubConnections.Count);
-                _connection.UpdateState(new BalancerState(ConnectivityState.Ready, new RoundRobinPicker(readySubConnections, pickCount)));
+                int pickCount = _randomGenerator.Next(0, readySubChannels.Count);
+                _channel.UpdateState(new BalancerState(ConnectivityState.Ready, new RoundRobinPicker(readySubChannels, pickCount)));
             }
         }
 
-        public override void UpdateSubConnectionState(SubConnection subConnection, SubConnectionState state)
+        public override void UpdateSubChannelState(SubChannel subChannel, SubChannelState state)
         {
-            _logger.LogInformation("Updating sub-connection state.");
+            _logger.LogInformation("Updating sub-channel state.");
 
-            var index = FindSubConnection(_subConnections, subConnection);
+            var index = FindSubChannel(_subChannels, subChannel);
             if (index == null)
             {
-                _logger.LogInformation("Ignored state change because of unknown sub-connection.");
+                _logger.LogInformation("Ignored state change because of unknown sub-channel.");
                 return;
             }
 
             if (state.ConnectivityState == ConnectivityState.Idle)
             {
-                _ = subConnection.ConnectAsync(CancellationToken.None);
+                _ = subChannel.ConnectAsync(CancellationToken.None);
             }
 
             UpdateBalancingState();
@@ -218,24 +218,24 @@ namespace Grpc.Net.Client.Balancer
         }
     }
 
-    internal class RoundRobinPicker : SubConnectionPicker
+    internal class RoundRobinPicker : SubChannelPicker
     {
         // Internal for testing
-        internal readonly List<(DnsEndPoint Address, SubConnection SubConnection)> _subConnections;
+        internal readonly List<(DnsEndPoint Address, SubChannel SubChannel)> _subChannels;
         private long _pickCount;
 
-        public RoundRobinPicker(List<(DnsEndPoint Address, SubConnection SubConnection)> subConnections, long pickCount)
+        public RoundRobinPicker(List<(DnsEndPoint Address, SubChannel SubChannel)> subChannels, long pickCount)
         {
-            _subConnections = subConnections;
+            _subChannels = subChannels;
             _pickCount = pickCount;
         }
 
         public override PickResult Pick(PickContext context)
         {
             var c = Interlocked.Increment(ref _pickCount);
-            var index = (c - 1) % _subConnections.Count;
+            var index = (c - 1) % _subChannels.Count;
 
-            return new PickResult(_subConnections[(int)index].SubConnection, c => { });
+            return new PickResult(_subChannels[(int)index].SubChannel, c => { });
         }
     }
 

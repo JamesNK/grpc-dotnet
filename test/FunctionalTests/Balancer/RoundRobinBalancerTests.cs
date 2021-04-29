@@ -65,9 +65,9 @@ namespace Grpc.Net.Client.Tests.Balancer
             }
 
             // Arrange
-            using var endpoint = BalancerHelpers.CreateGrpcEndpoint<HelloRequest, HelloReply>(50150, UnaryMethod, nameof(UnaryMethod));
+            using var endpoint = BalancerHelpers.CreateGrpcEndpoint<HelloRequest, HelloReply>(50250, UnaryMethod, nameof(UnaryMethod));
 
-            var grpcConnection = new GrpcConnection(new StaticAddressResolver(new[] { new DnsEndPoint(endpoint.Address.Host, endpoint.Address.Port) }), LoggerFactory);
+            var grpcConnection = new GrpcClientChannel(new StaticAddressResolver(new[] { new DnsEndPoint(endpoint.Address.Host, endpoint.Address.Port) }), LoggerFactory);
             grpcConnection.ConfigureBalancer(c => new RoundRobinBalancer(c, LoggerFactory));
 
             var channel = GrpcChannel.ForAddress(endpoint.Address, new GrpcChannelOptions
@@ -83,18 +83,18 @@ namespace Grpc.Net.Client.Tests.Balancer
 
             // Assert
             Assert.AreEqual("Balancer", reply.Message);
-            Assert.AreEqual("127.0.0.1:50150", host);
+            Assert.AreEqual("127.0.0.1:50250", host);
 
             endpoint.Dispose();
 
-            using var endpointNew = BalancerHelpers.CreateGrpcEndpoint<HelloRequest, HelloReply>(50150, UnaryMethod, nameof(UnaryMethod));
+            using var endpointNew = BalancerHelpers.CreateGrpcEndpoint<HelloRequest, HelloReply>(50250, UnaryMethod, nameof(UnaryMethod));
 
             // Act
             reply = await client.UnaryCall(new HelloRequest { Name = "Balancer" }).ResponseAsync.DefaultTimeout();
 
             // Assert
             Assert.AreEqual("Balancer", reply.Message);
-            Assert.AreEqual("127.0.0.1:50150", host);
+            Assert.AreEqual("127.0.0.1:50250", host);
         }
 
         [Test]
@@ -114,10 +114,10 @@ namespace Grpc.Net.Client.Tests.Balancer
             }
 
             // Arrange
-            using var endpoint1 = BalancerHelpers.CreateGrpcEndpoint<HelloRequest, HelloReply>(50150, UnaryMethod, nameof(UnaryMethod));
-            using var endpoint2 = BalancerHelpers.CreateGrpcEndpoint<HelloRequest, HelloReply>(50151, UnaryMethod, nameof(UnaryMethod));
+            using var endpoint1 = BalancerHelpers.CreateGrpcEndpoint<HelloRequest, HelloReply>(50250, UnaryMethod, nameof(UnaryMethod));
+            using var endpoint2 = BalancerHelpers.CreateGrpcEndpoint<HelloRequest, HelloReply>(50251, UnaryMethod, nameof(UnaryMethod));
 
-            var grpcConnection = new GrpcConnection(new StaticAddressResolver(new[]
+            var grpcConnection = new GrpcClientChannel(new StaticAddressResolver(new[]
             {
                 new DnsEndPoint(endpoint1.Address.Host, endpoint1.Address.Port),
                 new DnsEndPoint(endpoint2.Address.Host, endpoint2.Address.Port)
@@ -128,7 +128,7 @@ namespace Grpc.Net.Client.Tests.Balancer
             await TestHelpers.AssertIsTrueRetryAsync(() =>
             {
                 var picker = grpcConnection._picker as RoundRobinPicker;
-                return picker?._subConnections.Count == 2;
+                return picker?._subChannels.Count == 2;
             }, "Wait for all subconnections to be connected.").DefaultTimeout();
 
             var channel = GrpcChannel.ForAddress(endpoint1.Address, new GrpcChannelOptions
@@ -143,19 +143,19 @@ namespace Grpc.Net.Client.Tests.Balancer
             var reply = await client.UnaryCall(new HelloRequest { Name = "Balancer" }).ResponseAsync.DefaultTimeout();
             // Assert
             Assert.AreEqual("Balancer", reply.Message);
-            Assert.AreEqual("127.0.0.1:50150", host);
+            Assert.AreEqual("127.0.0.1:50250", host);
 
             // Act
             reply = await client.UnaryCall(new HelloRequest { Name = "Balancer" }).ResponseAsync.DefaultTimeout();
             // Assert
             Assert.AreEqual("Balancer", reply.Message);
-            Assert.AreEqual("127.0.0.1:50151", host);
+            Assert.AreEqual("127.0.0.1:50251", host);
 
             // Act
             reply = await client.UnaryCall(new HelloRequest { Name = "Balancer" }).ResponseAsync.DefaultTimeout();
             // Assert
             Assert.AreEqual("Balancer", reply.Message);
-            Assert.AreEqual("127.0.0.1:50150", host);
+            Assert.AreEqual("127.0.0.1:50250", host);
         }
 
         [Test]
@@ -175,10 +175,10 @@ namespace Grpc.Net.Client.Tests.Balancer
             }
 
             // Arrange
-            using var endpoint1 = BalancerHelpers.CreateGrpcEndpoint<HelloRequest, HelloReply>(50150, UnaryMethod, nameof(UnaryMethod));
-            using var endpoint2 = BalancerHelpers.CreateGrpcEndpoint<HelloRequest, HelloReply>(50151, UnaryMethod, nameof(UnaryMethod));
+            using var endpoint1 = BalancerHelpers.CreateGrpcEndpoint<HelloRequest, HelloReply>(50250, UnaryMethod, nameof(UnaryMethod));
+            using var endpoint2 = BalancerHelpers.CreateGrpcEndpoint<HelloRequest, HelloReply>(50251, UnaryMethod, nameof(UnaryMethod));
 
-            var grpcConnection = new GrpcConnection(new StaticAddressResolver(new[]
+            var grpcConnection = new GrpcClientChannel(new StaticAddressResolver(new[]
             {
                 new DnsEndPoint(endpoint1.Address.Host, endpoint1.Address.Port),
                 new DnsEndPoint(endpoint2.Address.Host, endpoint2.Address.Port)
@@ -195,13 +195,13 @@ namespace Grpc.Net.Client.Tests.Balancer
 
             var reply = await client.UnaryCall(new HelloRequest { Name = "Balancer" });
             Assert.AreEqual("Balancer", reply.Message);
-            Assert.AreEqual("127.0.0.1:50150", host);
+            Assert.AreEqual("127.0.0.1:50250", host);
 
             endpoint1.Dispose();
 
             reply = await client.UnaryCall(new HelloRequest { Name = "Balancer" });
             Assert.AreEqual("Balancer", reply.Message);
-            Assert.AreEqual("127.0.0.1:50151", host);
+            Assert.AreEqual("127.0.0.1:50251", host);
         }
 
         private class TestRandomGenerator : IRandomGenerator

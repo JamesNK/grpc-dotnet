@@ -99,7 +99,7 @@ namespace Grpc.Net.Client.Tests.Balancer
                 endpointName);
         }
 
-        public static BalancerHttpHandler CreateBalancerHandler(GrpcConnection grpcConnection, ILoggerFactory loggerFactory, HttpMessageHandler? innerHandler = null)
+        public static BalancerHttpHandler CreateBalancerHandler(GrpcClientChannel grpcConnection, ILoggerFactory loggerFactory, HttpMessageHandler? innerHandler = null)
         {
             return new BalancerHttpHandler(
                 innerHandler ?? new SocketsHttpHandler { EnableMultipleHttp2Connections = true },

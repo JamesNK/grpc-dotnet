@@ -32,7 +32,9 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Grpc.Net.Client.Internal.Retry;
 using System.Threading;
 using System.Diagnostics;
+#if HAVE_LOAD_BALANCING
 using Grpc.Net.Client.Balancer;
+#endif
 
 namespace Grpc.Net.Client
 {
@@ -73,8 +75,10 @@ namespace Grpc.Net.Client
         internal string MessageAcceptEncoding { get; }
         internal bool Disposed { get; private set; }
 
+#if HAVE_LOAD_BALANCING
         // Load balancing
-        internal AddressResolver? _addressResolver;
+        internal AddressResolver? AddressResolver { get; }
+#endif
 
         // Stateful
         internal ChannelRetryThrottling? RetryThrottling { get; }
@@ -132,15 +136,42 @@ namespace Grpc.Net.Client
                 ValidateChannelCredentials();
             }
 
-            (IEnumerable<AddressResolverFactory>)channelOptions.ServiceProvider.GetService(typeof(IEnumerable<AddressResolverFactory>));
+#if HAVE_LOAD_BALANCING
+            if (string.Equals(Address.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(Address.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase))
+            {
 
-            if (Address.Scheme)
+            }
+            else
+            {
+                AddressResolver = CreateAddressResolver(channelOptions.ServiceProvider);
+            }
+#endif
 
             if (!string.IsNullOrEmpty(Address.PathAndQuery) && Address.PathAndQuery != "/")
             {
                 Log.AddressPathUnused(Logger, Address.OriginalString);
             }
         }
+
+#if HAVE_LOAD_BALANCING
+        private AddressResolver CreateAddressResolver(IServiceProvider? serviceProvider)
+        {
+            var factories = (IEnumerable<AddressResolverFactory>?)serviceProvider?.GetService(typeof(IEnumerable<AddressResolverFactory>));
+            if (factories != null)
+            {
+                foreach (var factory in factories)
+                {
+                    if (string.Equals(factory.Name, Address.Scheme, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return factory.Create(Address, new AddressResolverOptions());
+                    }
+                }
+            }
+
+            throw new InvalidOperationException($"No address resolver configured for the scheme '{Address.Scheme}'.");
+        }
+#endif
 
         private ChannelRetryThrottling CreateChannelRetryThrottling(RetryThrottlingPolicy retryThrottling)
         {
