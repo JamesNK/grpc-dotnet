@@ -20,15 +20,21 @@
 
 using System;
 using System.IO;
+using System.Linq;
+using System.Net;
 using System.Net.Http;
+using System.Threading.Tasks;
 using FunctionalTestsWebsite;
 using Google.Protobuf;
 using Grpc.AspNetCore.FunctionalTests.Infrastructure;
 using Grpc.Core;
 using Grpc.Net.Client.Balancer;
 using Grpc.Net.Client.Balancer.Internal;
+using Grpc.Net.Client.Configuration;
+using Grpc.Net.Client.Internal;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
 namespace Grpc.Net.Client.Tests.Balancer
@@ -105,6 +111,40 @@ namespace Grpc.Net.Client.Tests.Balancer
             return new BalancerHttpHandler(
                 innerHandler ?? new SocketsHttpHandler { EnableMultipleHttp2Connections = true },
                 grpcConnection);
+        }
+
+        public static async Task<GrpcChannel> CreateChannel(ILoggerFactory loggerFactory, LoadBalancingConfig? loadBalancingConfig, params Uri[] endpoints)
+        {
+            var e = endpoints.Select(i => new DnsEndPoint(i.Host, i.Port)).ToArray();
+
+            var services = new ServiceCollection();
+            services.AddSingleton<AddressResolverFactory>(new StaticAddressResolverFactory(e));
+            services.AddSingleton<IRandomGenerator>(new TestRandomGenerator());
+
+            var serviceConfig = new ServiceConfig();
+            if (loadBalancingConfig != null)
+            {
+                serviceConfig.LoadBalancingConfigs.Add(loadBalancingConfig);
+            }
+
+            var channel = GrpcChannel.ForAddress("static://localhost", new GrpcChannelOptions
+            {
+                LoggerFactory = loggerFactory,
+                Credentials = ChannelCredentials.Insecure,
+                ServiceProvider = services.BuildServiceProvider(),
+                ServiceConfig = serviceConfig
+            });
+
+            await channel.ConnectAsync();
+            return channel;
+        }
+
+        private class TestRandomGenerator : IRandomGenerator
+        {
+            public int Next(int minValue, int maxValue)
+            {
+                return 0;
+            }
         }
     }
 }

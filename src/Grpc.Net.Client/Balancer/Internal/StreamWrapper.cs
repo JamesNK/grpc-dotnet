@@ -16,7 +16,7 @@
 
 #endregion
 
-#if NET5_0_OR_GREATER
+#if HAVE_LOAD_BALANCING
 
 using System;
 using System.IO;

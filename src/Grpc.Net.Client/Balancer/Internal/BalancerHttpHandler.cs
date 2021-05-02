@@ -30,20 +30,25 @@ namespace Grpc.Net.Client.Balancer.Internal
     internal class BalancerHttpHandler : DelegatingHandler
     {
         private readonly ClientChannel _clientConnection;
+#if NET5_0_OR_GREATER
         private static readonly HttpRequestOptionsKey<SubChannel> _requestOptionsSubConnectionKey = new HttpRequestOptionsKey<SubChannel>(nameof(SubChannel));
+#endif
 
         public BalancerHttpHandler(HttpMessageHandler innerHandler, ClientChannel clientConnection)
             : base(innerHandler)
         {
             _clientConnection = clientConnection;
 
+#if NET5_0_OR_GREATER
             var socketsHttpHandler = (SocketsHttpHandler?)HttpHandlerFactory.GetHttpHandlerType(innerHandler, "System.Net.Http.SocketsHttpHandler");
             if (socketsHttpHandler != null)
             {
                 socketsHttpHandler.ConnectCallback = OnConnect;
             }
+#endif
         }
 
+#if NET5_0_OR_GREATER
         private async ValueTask<Stream> OnConnect(SocketsHttpConnectionContext context, CancellationToken cancellationToken)
         {
             if (!context.InitialRequestMessage.Options.TryGetValue(_requestOptionsSubConnectionKey, out var subConnection))
@@ -51,8 +56,9 @@ namespace Grpc.Net.Client.Balancer.Internal
                 throw new InvalidOperationException();
             }
 
-            return await subConnection.GetStreamAsync(context.DnsEndPoint, cancellationToken).ConfigureAwait(false);
+            return await subConnection.Transport.GetStreamAsync(context.DnsEndPoint, cancellationToken).ConfigureAwait(false);
         }
+#endif
 
         protected override async Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request, CancellationToken cancellationToken)
@@ -66,11 +72,36 @@ namespace Grpc.Net.Client.Balancer.Internal
             uriBuilder.Port = result.SubChannel!.CurrentEndPoint!.Port;
             request.RequestUri = uriBuilder.Uri;
 
+#if NET5_0_OR_GREATER
             // Set sub-connection onto request.
             // Will be used to get a stream in SocketsHttpHandler.ConnectCallback.
             request.Options.Set(_requestOptionsSubConnectionKey, result.SubChannel);
+#endif
 
-            return await base.SendAsync(request, cancellationToken).ConfigureAwait(false);
+            try
+            {
+                var responseMessage = await base.SendAsync(request, cancellationToken).ConfigureAwait(false);
+                if (responseMessage.Content == null)
+                {
+                    result.Complete(new CompleteContext());
+                }
+                else
+                {
+                    // TODO
+                    // Wrap content and complete when disposed or read to end.
+                }
+
+                return responseMessage;
+            }
+            catch (Exception ex)
+            {
+                result.Complete(new CompleteContext
+                {
+                    Error = ex
+                });
+
+                throw;
+            }
         }
     }
 }

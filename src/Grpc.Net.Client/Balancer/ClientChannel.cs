@@ -27,6 +27,7 @@ using System.Net.Http;
 using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
+using Grpc.Net.Client.Balancer.Internal;
 using Microsoft.Extensions.Logging;
 
 namespace Grpc.Net.Client.Balancer
@@ -78,16 +79,17 @@ namespace Grpc.Net.Client.Balancer
 
         public SubChannel CreateSubChannel(SubChannelOptions options)
         {
-            var subConnection = new SubChannel(this, options.Addresses);
+            var subChannel = new SubChannel(this, options.Addresses);
+            subChannel.Transport = new ActiveHealthTransport(subChannel);
 
-            Logger.LogInformation("Created sub-connection: " + subConnection);
+            Logger.LogInformation("Created sub-channel: " + subChannel);
 
             lock (_subChannels)
             {
-                _subChannels.Add(subConnection);
+                _subChannels.Add(subChannel);
             }
 
-            return subConnection;
+            return subChannel;
         }
 
         public void RemoveSubChannel(SubChannel subChannel)
@@ -239,7 +241,7 @@ namespace Grpc.Net.Client.Balancer
             {
                 if (_picker != null && _picker != currentPicker)
                 {
-                    return ValueTask.FromResult(_picker);
+                    return new ValueTask<SubChannelPicker>(_picker);
                 }
                 else
                 {

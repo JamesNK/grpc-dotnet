@@ -30,6 +30,7 @@ using Grpc.AspNetCore.FunctionalTests;
 using Grpc.AspNetCore.FunctionalTests.Infrastructure;
 using Grpc.Core;
 using Grpc.Net.Client.Balancer;
+using Grpc.Net.Client.Balancer.Internal;
 using Grpc.Net.Client.Web;
 using Grpc.Tests.Shared;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
@@ -200,27 +201,28 @@ namespace Grpc.Net.Client.Tests.Balancer
 
             Logger.LogInformation($"Done sending gRPC calls");
 
-            var subConnection = balancer!._subChannel!;
-            var activeTransports = subConnection._activeTransports;
+            var subChannel = balancer!._subChannel!;
+            var transport = (ActiveHealthTransport)subChannel.Transport;
+            var activeStreams = transport._activeStreams;
 
             // Assert
-            Assert.AreEqual(2, activeTransports.Count);
-            Assert.AreEqual(new DnsEndPoint("127.0.0.1", 50250), activeTransports[0].EndPoint);
-            Assert.AreEqual(new DnsEndPoint("127.0.0.1", 50250), activeTransports[1].EndPoint);
+            Assert.AreEqual(2, activeStreams.Count);
+            Assert.AreEqual(new DnsEndPoint("127.0.0.1", 50250), activeStreams[0].EndPoint);
+            Assert.AreEqual(new DnsEndPoint("127.0.0.1", 50250), activeStreams[1].EndPoint);
 
             tcs.SetResult(null);
 
             await Task.WhenAll(callTasks).DefaultTimeout();
 
             endpoint1.Dispose();
-            Assert.AreEqual(0, activeTransports.Count);
+            Assert.AreEqual(0, activeStreams.Count);
 
             var reply = await client.UnaryCall(new HelloRequest { Name = "Balancer" }).ResponseAsync.DefaultTimeout();
             Assert.AreEqual("Balancer", reply.Message);
             Assert.AreEqual("127.0.0.1:50251", host);
 
-            Assert.AreEqual(1, activeTransports.Count);
-            Assert.AreEqual(new DnsEndPoint("127.0.0.1", 50251), activeTransports[0].EndPoint);
+            Assert.AreEqual(1, activeStreams.Count);
+            Assert.AreEqual(new DnsEndPoint("127.0.0.1", 50251), activeStreams[0].EndPoint);
         }
     }
 }

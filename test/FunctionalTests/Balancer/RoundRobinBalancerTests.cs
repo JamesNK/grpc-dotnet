@@ -35,11 +35,13 @@ using Grpc.AspNetCore.FunctionalTests.Client;
 using Grpc.AspNetCore.FunctionalTests.Infrastructure;
 using Grpc.Core;
 using Grpc.Net.Client.Balancer;
+using Grpc.Net.Client.Configuration;
 using Grpc.Net.Client.Internal;
 using Grpc.Shared;
 using Grpc.Tests.Shared;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using NUnit.Framework;
 
@@ -67,14 +69,7 @@ namespace Grpc.Net.Client.Tests.Balancer
             // Arrange
             using var endpoint = BalancerHelpers.CreateGrpcEndpoint<HelloRequest, HelloReply>(50250, UnaryMethod, nameof(UnaryMethod));
 
-            var grpcConnection = new ClientChannel(new StaticAddressResolver(new[] { new DnsEndPoint(endpoint.Address.Host, endpoint.Address.Port) }), LoggerFactory);
-            grpcConnection.ConfigureBalancer(c => new RoundRobinBalancer(c, LoggerFactory));
-
-            var channel = GrpcChannel.ForAddress(endpoint.Address, new GrpcChannelOptions
-            {
-                LoggerFactory = LoggerFactory,
-                HttpHandler = BalancerHelpers.CreateBalancerHandler(grpcConnection, LoggerFactory)
-            });
+            var channel = await BalancerHelpers.CreateChannel(LoggerFactory, new RoundRobinConfig(), endpoint.Address);
 
             var client = TestClientFactory.Create(channel, endpoint.Method);
 
@@ -117,25 +112,13 @@ namespace Grpc.Net.Client.Tests.Balancer
             using var endpoint1 = BalancerHelpers.CreateGrpcEndpoint<HelloRequest, HelloReply>(50250, UnaryMethod, nameof(UnaryMethod));
             using var endpoint2 = BalancerHelpers.CreateGrpcEndpoint<HelloRequest, HelloReply>(50251, UnaryMethod, nameof(UnaryMethod));
 
-            var grpcConnection = new ClientChannel(new StaticAddressResolver(new[]
-            {
-                new DnsEndPoint(endpoint1.Address.Host, endpoint1.Address.Port),
-                new DnsEndPoint(endpoint2.Address.Host, endpoint2.Address.Port)
-            }), LoggerFactory);
-            grpcConnection.ConfigureBalancer(c => new RoundRobinBalancer(c, LoggerFactory, new TestRandomGenerator()));
+            var channel = await BalancerHelpers.CreateChannel(LoggerFactory, new RoundRobinConfig(), endpoint1.Address, endpoint2.Address);
 
-            await grpcConnection.ConnectAsync(CancellationToken.None);
             await TestHelpers.AssertIsTrueRetryAsync(() =>
             {
-                var picker = grpcConnection._picker as RoundRobinPicker;
+                var picker = channel.ClientChannel._picker as RoundRobinPicker;
                 return picker?._subChannels.Count == 2;
             }, "Wait for all subconnections to be connected.").DefaultTimeout();
-
-            var channel = GrpcChannel.ForAddress(endpoint1.Address, new GrpcChannelOptions
-            {
-                LoggerFactory = LoggerFactory,
-                HttpHandler = BalancerHelpers.CreateBalancerHandler(grpcConnection, LoggerFactory)
-            });
 
             var client = TestClientFactory.Create(channel, endpoint1.Method);
 
@@ -178,38 +161,26 @@ namespace Grpc.Net.Client.Tests.Balancer
             using var endpoint1 = BalancerHelpers.CreateGrpcEndpoint<HelloRequest, HelloReply>(50250, UnaryMethod, nameof(UnaryMethod));
             using var endpoint2 = BalancerHelpers.CreateGrpcEndpoint<HelloRequest, HelloReply>(50251, UnaryMethod, nameof(UnaryMethod));
 
-            var grpcConnection = new ClientChannel(new StaticAddressResolver(new[]
-            {
-                new DnsEndPoint(endpoint1.Address.Host, endpoint1.Address.Port),
-                new DnsEndPoint(endpoint2.Address.Host, endpoint2.Address.Port)
-            }), LoggerFactory);
-            await grpcConnection.ConnectAsync(CancellationToken.None);
-
-            var channel = GrpcChannel.ForAddress(endpoint1.Address, new GrpcChannelOptions
-            {
-                LoggerFactory = LoggerFactory,
-                HttpHandler = BalancerHelpers.CreateBalancerHandler(grpcConnection, LoggerFactory)
-            });
+            var channel = await BalancerHelpers.CreateChannel(LoggerFactory, new RoundRobinConfig(), endpoint1.Address, endpoint2.Address);
 
             var client = TestClientFactory.Create(channel, endpoint1.Method);
 
-            var reply = await client.UnaryCall(new HelloRequest { Name = "Balancer" });
-            Assert.AreEqual("Balancer", reply.Message);
-            Assert.AreEqual("127.0.0.1:50250", host);
+            var reply1 = await client.UnaryCall(new HelloRequest { Name = "Balancer1" });
+            Assert.AreEqual("Balancer1", reply1.Message);
+            var host1 = host;
+
+            var reply2 = await client.UnaryCall(new HelloRequest { Name = "Balancer2" });
+            Assert.AreEqual("Balancer2", reply2.Message);
+            var host2 = host;
+
+            Assert.Contains("127.0.0.1:50250", new[] { host1, host2 });
+            Assert.Contains("127.0.0.1:50251", new[] { host1, host2 });
 
             endpoint1.Dispose();
 
-            reply = await client.UnaryCall(new HelloRequest { Name = "Balancer" });
-            Assert.AreEqual("Balancer", reply.Message);
+            reply1 = await client.UnaryCall(new HelloRequest { Name = "Balancer" });
+            Assert.AreEqual("Balancer", reply1.Message);
             Assert.AreEqual("127.0.0.1:50251", host);
-        }
-
-        private class TestRandomGenerator : IRandomGenerator
-        {
-            public int Next(int minValue, int maxValue)
-            {
-                return 0;
-            }
         }
     }
 }

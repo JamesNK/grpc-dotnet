@@ -57,7 +57,6 @@ namespace Grpc.Net.Client
         private readonly ConcurrentDictionary<IMethod, GrpcMethodInfo> _methodInfoCache;
         private readonly Func<IMethod, GrpcMethodInfo> _createMethodInfoFunc;
         private readonly Dictionary<MethodKey, MethodConfig>? _serviceConfigMethods;
-        private readonly Random? _random;
         // Internal for testing
         internal readonly HashSet<IDisposable> ActiveCalls;
 
@@ -72,7 +71,7 @@ namespace Grpc.Net.Client
         internal ILoggerFactory LoggerFactory { get; }
         internal ILogger Logger { get; }
         internal bool ThrowOperationCanceledOnCancellation { get; }
-        internal bool? IsSecure { get; }
+        internal bool IsSecure { get; }
         internal List<CallCredentials>? CallCredentials { get; }
         internal Dictionary<string, ICompressionProvider> CompressionProviders { get; }
         internal string MessageAcceptEncoding { get; }
@@ -91,10 +90,16 @@ namespace Grpc.Net.Client
         // Options that are set in unit tests
         internal ISystemClock Clock = SystemClock.Instance;
         internal IOperatingSystem OperatingSystem = Internal.OperatingSystem.Instance;
+        internal IRandomGenerator RandomGenerator;
         internal bool DisableClientDeadline;
         internal long MaxTimerDueTime = uint.MaxValue - 1; // Max System.Threading.Timer due time
 
         private readonly bool _shouldDisposeHttpClient;
+
+        private T ResolveService<T>(IServiceProvider? serviceProvider, T defaultValue)
+        {
+            return (T?)serviceProvider?.GetService(typeof(T)) ?? defaultValue;
+        }
 
         internal GrpcChannel(Uri address, GrpcChannelOptions channelOptions) : base(address.Authority)
         {
@@ -108,9 +113,8 @@ namespace Grpc.Net.Client
                 || channelOptions.DisposeHttpClient;
 
             Address = address;
-            LoggerFactory = channelOptions.LoggerFactory ??
-                (ILoggerFactory?)channelOptions.ServiceProvider?.GetService(typeof(ILoggerFactory)) ??
-                NullLoggerFactory.Instance;
+            LoggerFactory = channelOptions.LoggerFactory ?? ResolveService<ILoggerFactory>(channelOptions.ServiceProvider, NullLoggerFactory.Instance);
+            RandomGenerator = ResolveService<IRandomGenerator>(channelOptions.ServiceProvider, new RandomGenerator());
 
 #if HAVE_LOAD_BALANCING
             if (Address.Scheme == Uri.UriSchemeHttps || Address.Scheme == Uri.UriSchemeHttp)
@@ -123,6 +127,25 @@ namespace Grpc.Net.Client
             }
 
             ClientChannel = new ClientChannel(AddressResolver, LoggerFactory);
+            ClientChannel.ConfigureBalancer(c =>
+            {
+                if (channelOptions.ServiceConfig != null)
+                {
+                    for (var i = 0; i < channelOptions.ServiceConfig.LoadBalancingConfigs.Count; i++)
+                    {
+                        switch (channelOptions.ServiceConfig.LoadBalancingConfigs[0].PolicyName)
+                        {
+                            case LoadBalancingConfig.PickFirstPolicyName:
+                                return new PickFirstBalancer(c, LoggerFactory);
+                            case LoadBalancingConfig.RoundRobinPolicyName:
+                                return new RoundRobinBalancer(c, LoggerFactory, RandomGenerator);
+                        }
+                    }
+                }
+
+                // Default to pick first balancer
+                return new PickFirstBalancer(c, LoggerFactory);
+            });
 #endif
 
             HttpInvoker = channelOptions.HttpClient ?? CreateInternalHttpInvoker(channelOptions.HttpHandler);
@@ -142,7 +165,6 @@ namespace Grpc.Net.Client
             {
                 RetryThrottling = serviceConfig.RetryThrottling != null ? CreateChannelRetryThrottling(serviceConfig.RetryThrottling) : null;
                 _serviceConfigMethods = CreateServiceConfigMethods(serviceConfig);
-                _random = new Random();
             }
 
             if (channelOptions.Credentials != null)
@@ -150,7 +172,7 @@ namespace Grpc.Net.Client
                 var configurator = new DefaultChannelCredentialsConfigurator();
                 channelOptions.Credentials.InternalPopulateConfiguration(configurator, null);
 
-                IsSecure = configurator.IsSecure;
+                IsSecure = configurator.IsSecure ?? false;
                 CallCredentials = configurator.CallCredentials;
 
                 ValidateChannelCredentials();
@@ -290,7 +312,11 @@ namespace Grpc.Net.Client
             var scope = new GrpcCallScope(method.Type, uri);
             var methodConfig = ResolveMethodConfig(method);
 
-            return new GrpcMethodInfo(scope, new Uri(Address, uri), methodConfig);
+            var uriBuilder = new UriBuilder(Address);
+            uriBuilder.Scheme = IsSecure ? Uri.UriSchemeHttps : Uri.UriSchemeHttp;
+            uriBuilder.Path = method.FullName;
+
+            return new GrpcMethodInfo(scope, uriBuilder.Uri, methodConfig);
         }
 
         private MethodConfig? ResolveMethodConfig(IMethod method)
@@ -337,16 +363,13 @@ namespace Grpc.Net.Client
 
         private void ValidateChannelCredentials()
         {
-            if (IsSecure != null)
+            if (IsSecure && Address.Scheme == Uri.UriSchemeHttp)
             {
-                if (IsSecure.Value && Address.Scheme == Uri.UriSchemeHttp)
-                {
-                    throw new InvalidOperationException($"Channel is configured with secure channel credentials and can't use a HttpClient with a '{Address.Scheme}' scheme.");
-                }
-                if (!IsSecure.Value && Address.Scheme == Uri.UriSchemeHttps)
-                {
-                    throw new InvalidOperationException($"Channel is configured with insecure channel credentials and can't use a HttpClient with a '{Address.Scheme}' scheme.");
-                }
+                throw new InvalidOperationException($"Channel is configured with secure channel credentials and can't use a HttpClient with a '{Address.Scheme}' scheme.");
+            }
+            if (!IsSecure && Address.Scheme == Uri.UriSchemeHttps)
+            {
+                throw new InvalidOperationException($"Channel is configured with insecure channel credentials and can't use a HttpClient with a '{Address.Scheme}' scheme.");
             }
         }
 
@@ -486,11 +509,11 @@ namespace Grpc.Net.Client
 
         internal int GetRandomNumber(int minValue, int maxValue)
         {
-            CompatibilityHelpers.Assert(_random != null);
+            CompatibilityHelpers.Assert(RandomGenerator != null);
 
             lock (_lock)
             {
-                return _random.Next(minValue, maxValue);
+                return RandomGenerator.Next(minValue, maxValue);
             }
         }
 

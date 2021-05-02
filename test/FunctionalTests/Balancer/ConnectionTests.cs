@@ -31,9 +31,11 @@ using Grpc.AspNetCore.FunctionalTests.Infrastructure;
 using Grpc.Core;
 using Grpc.Net.Client;
 using Grpc.Net.Client.Balancer;
+using Grpc.Net.Client.Balancer.Internal;
 using Grpc.Net.Client.Web;
 using Grpc.Tests.Shared;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using NUnit.Framework;
 
@@ -68,14 +70,12 @@ namespace Grpc.Net.Client.Tests.Balancer
             using var endpoint1 = BalancerHelpers.CreateGrpcEndpoint<HelloRequest, HelloReply>(50250, UnaryMethod, nameof(UnaryMethod), HttpProtocols.Http1AndHttp2, isHttps: true);
             using var endpoint2 = BalancerHelpers.CreateGrpcEndpoint<HelloRequest, HelloReply>(50251, UnaryMethod, nameof(UnaryMethod), HttpProtocols.Http1AndHttp2, isHttps: true);
 
-            var grpcConnection = new ClientChannel(new StaticAddressResolver(new[]
+            var services = new ServiceCollection();
+            services.AddSingleton<AddressResolverFactory>(new StaticAddressResolverFactory(new[]
             {
                 new DnsEndPoint(endpoint1.Address.Host, endpoint1.Address.Port),
                 new DnsEndPoint(endpoint2.Address.Host, endpoint2.Address.Port)
-            }), LoggerFactory);
-
-            PickFirstBalancer? balancer = null;
-            grpcConnection.ConfigureBalancer(c => balancer = new PickFirstBalancer(c, LoggerFactory));
+            }));
 
             var socketsHttpHandler = new SocketsHttpHandler
             {
@@ -83,11 +83,14 @@ namespace Grpc.Net.Client.Tests.Balancer
                 SslOptions = new System.Net.Security.SslClientAuthenticationOptions() { RemoteCertificateValidationCallback = (_, __, ___, ____) => true }
             };
             var grpcWebHandler = new GrpcWebHandler(GrpcWebMode.GrpcWeb, new RequestVersionHandler(socketsHttpHandler));
-            var channel = GrpcChannel.ForAddress(endpoint1.Address, new GrpcChannelOptions
+            var channel = GrpcChannel.ForAddress("static://localhost", new GrpcChannelOptions
             {
                 LoggerFactory = LoggerFactory,
-                HttpHandler = BalancerHelpers.CreateBalancerHandler(grpcConnection, LoggerFactory, innerHandler: grpcWebHandler)
+                HttpHandler = grpcWebHandler,
+                ServiceProvider = services.BuildServiceProvider(),
+                Credentials = new SslCredentials()
             });
+            var balancer = (PickFirstBalancer)channel.ClientChannel._balancer!;
 
             var client = TestClientFactory.Create(channel, endpoint1.Method);
 
@@ -103,14 +106,15 @@ namespace Grpc.Net.Client.Tests.Balancer
 
             Logger.LogInformation($"Done sending gRPC calls");
 
-            var subConnection = balancer!._subChannel!;
-            var activeTransports = subConnection._activeTransports;
+            var subChannel = balancer._subChannel!;
+            var transport = (ActiveHealthTransport)subChannel.Transport;
+            var activeStreams = transport._activeStreams;
 
             // Assert
-            await TestHelpers.AssertIsTrueRetryAsync(() => activeTransports.Count == 10, "Wait for connections to start.");
-            foreach (var transport in activeTransports)
+            await TestHelpers.AssertIsTrueRetryAsync(() => activeStreams.Count == 10, "Wait for connections to start.");
+            foreach (var t in activeStreams)
             {
-                Assert.AreEqual(new DnsEndPoint("127.0.0.1", 50250), transport.EndPoint);
+                Assert.AreEqual(new DnsEndPoint("127.0.0.1", 50250), t.EndPoint);
             }
 
             // Act
@@ -126,8 +130,8 @@ namespace Grpc.Net.Client.Tests.Balancer
             Logger.LogInformation($"Done sending gRPC calls");
 
             // Assert
-            await TestHelpers.AssertIsTrueRetryAsync(() => activeTransports.Count == 11, "Wait for connections to start.");
-            Assert.AreEqual(new DnsEndPoint("127.0.0.1", 50250), activeTransports.Last().EndPoint);
+            await TestHelpers.AssertIsTrueRetryAsync(() => activeStreams.Count == 11, "Wait for connections to start.");
+            Assert.AreEqual(new DnsEndPoint("127.0.0.1", 50250), activeStreams.Last().EndPoint);
 
             tcs.SetResult(null);
 
@@ -138,7 +142,7 @@ namespace Grpc.Net.Client.Tests.Balancer
 
             // There are still be 10 HTTP/1.1 connections because they aren't immediately removed
             // when the server is shutdown and connectivity is lost.
-            Assert.AreEqual(10, activeTransports.Count);
+            Assert.AreEqual(10, activeStreams.Count);
 
             grpcWebHandler.HttpVersion = new Version(1, 1);
 
@@ -146,15 +150,15 @@ namespace Grpc.Net.Client.Tests.Balancer
             Assert.AreEqual(StatusCode.Unavailable, ex.StatusCode);
 
             // Removed by failed call.
-            Assert.AreEqual(0, activeTransports.Count);
+            Assert.AreEqual(0, activeStreams.Count);
 
             // Next call goes to fallback address.
             var reply = await client.UnaryCall(new HelloRequest { Name = "Balancer" }).ResponseAsync.DefaultTimeout();
             Assert.AreEqual("Balancer", reply.Message);
             Assert.AreEqual("127.0.0.1:50251", host);
 
-            Assert.AreEqual(1, activeTransports.Count);
-            Assert.AreEqual(new DnsEndPoint("127.0.0.1", 50251), activeTransports[0].EndPoint);
+            Assert.AreEqual(1, activeStreams.Count);
+            Assert.AreEqual(new DnsEndPoint("127.0.0.1", 50251), activeStreams[0].EndPoint);
         }
 
         private class RequestVersionHandler : DelegatingHandler
