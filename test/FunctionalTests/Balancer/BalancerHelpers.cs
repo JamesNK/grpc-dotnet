@@ -26,13 +26,14 @@ using Google.Protobuf;
 using Grpc.AspNetCore.FunctionalTests.Infrastructure;
 using Grpc.Core;
 using Grpc.Net.Client.Balancer;
+using Grpc.Net.Client.Balancer.Internal;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.Extensions.Logging;
 
 namespace Grpc.Net.Client.Tests.Balancer
 {
-    public static class BalancerHelpers
+    internal static class BalancerHelpers
     {
         public static EndpointContext<TRequest, TResponse> CreateGrpcEndpoint<TRequest, TResponse>(
             int port,
@@ -99,7 +100,7 @@ namespace Grpc.Net.Client.Tests.Balancer
                 endpointName);
         }
 
-        public static BalancerHttpHandler CreateBalancerHandler(GrpcClientChannel grpcConnection, ILoggerFactory loggerFactory, HttpMessageHandler? innerHandler = null)
+        public static BalancerHttpHandler CreateBalancerHandler(ClientChannel grpcConnection, ILoggerFactory loggerFactory, HttpMessageHandler? innerHandler = null)
         {
             return new BalancerHttpHandler(
                 innerHandler ?? new SocketsHttpHandler { EnableMultipleHttp2Connections = true },

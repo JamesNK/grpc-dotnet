@@ -19,6 +19,7 @@
 #if HAVE_LOAD_BALANCING
 #pragma warning disable CS1591 // Missing XML comment for publicly visible type or member
 
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Net;
@@ -30,33 +31,149 @@ using Microsoft.Extensions.Logging;
 
 namespace Grpc.Net.Client.Balancer
 {
-    public abstract class ClientChannel
+    public class ClientChannel : IDisposable, IChannelControlHelper
     {
         private ConnectivityState _state;
+        private readonly AddressResolver _resolver;
+        private readonly ILoggerFactory _loggerFactory;
+        private IDisposable? _resolverSubscription;
+        private List<SubChannel> _subChannels;
 
         // Internal for testing
+        internal LoadBalancer? _balancer;
         internal SubChannelPicker? _picker;
+
         private TaskCompletionSource<SubChannelPicker> _nextPickerTcs;
         private readonly SemaphoreSlim _nextPickerLock;
         private readonly object _lock;
 
-        protected ClientChannel(ILoggerFactory loggerFactory)
+        public ClientChannel(AddressResolver resolver, ILoggerFactory loggerFactory)
         {
             _lock = new object();
             _nextPickerLock = new SemaphoreSlim(1);
             _nextPickerTcs = new TaskCompletionSource<SubChannelPicker>(TaskCreationOptions.RunContinuationsAsynchronously);
 
             Logger = loggerFactory.CreateLogger(GetType());
+
+            _subChannels = new List<SubChannel>();
+            _resolver = resolver;
+            _loggerFactory = loggerFactory;
         }
 
         public ConnectivityState State => _state;
 
         public ILogger Logger { get; }
-        public abstract SubChannel CreateSubChannel(SubChannelOptions options);
-        public abstract void RemoveSubChannel(SubChannel subChannel);
-        public abstract void UpdateAddresses(SubChannel subChannel, IReadOnlyList<DnsEndPoint> addresses);
-        public abstract Task ResolveNowAsync(CancellationToken cancellationToken);
-        public abstract Task ConnectAsync(CancellationToken cancellationToken);
+        public IList<SubChannel> GetSubChannels()
+        {
+            lock (_subChannels)
+            {
+                return _subChannels.ToArray();
+            }
+        }
+
+        public void ConfigureBalancer(Func<IChannelControlHelper, LoadBalancer> configure)
+        {
+            _balancer = configure(this);
+        }
+
+        public SubChannel CreateSubChannel(SubChannelOptions options)
+        {
+            var subConnection = new SubChannel(this, options.Addresses);
+
+            Logger.LogInformation("Created sub-connection: " + subConnection);
+
+            lock (_subChannels)
+            {
+                _subChannels.Add(subConnection);
+            }
+
+            return subConnection;
+        }
+
+        public void RemoveSubChannel(SubChannel subChannel)
+        {
+            Logger.LogInformation("Removing sub-channel: " + subChannel);
+
+            lock (_subChannels)
+            {
+                var removed = _subChannels.Remove(subChannel);
+                Debug.Assert(removed);
+            }
+
+            subChannel.Shutdown();
+        }
+
+        public Task ResolveNowAsync(CancellationToken cancellationToken)
+        {
+            return _resolver.RefreshAsync(cancellationToken);
+        }
+
+        public void UpdateAddresses(SubChannel subConnection, IReadOnlyList<DnsEndPoint> addresses)
+        {
+            subConnection.UpdateAddresses(addresses);
+        }
+
+        private void OnResolverError(Exception error)
+        {
+            throw new NotImplementedException();
+        }
+
+        private void OnResolverResult(AddressResolverResult value)
+        {
+            _balancer!.UpdateChannelState(new ChannelState(value, GrpcAttributes.Empty));
+        }
+
+        public void Dispose()
+        {
+            _resolverSubscription?.Dispose();
+            _balancer?.Dispose();
+        }
+
+        internal void OnSubConnectionStateChange(SubChannel subConnection, ConnectivityState state)
+        {
+            Logger.LogInformation("Sub-connection state change: " + subConnection + " " + state);
+            _balancer!.UpdateSubChannelState(subConnection, new SubChannelState { ConnectivityState = state });
+        }
+
+        public Task ConnectAsync(CancellationToken cancellationToken)
+        {
+            if (_resolverSubscription == null)
+            {
+                // Default to PickFirstBalancer
+                if (_balancer == null)
+                {
+                    _balancer = new PickFirstBalancer(this, _loggerFactory);
+                }
+
+                _resolverSubscription = _resolver.Subscribe(new ResolverObserver(this));
+            }
+
+            return Task.CompletedTask;
+        }
+
+        private class ResolverObserver : IObserver<AddressResolverResult>
+        {
+            private readonly ClientChannel _channel;
+
+            public ResolverObserver(ClientChannel channel)
+            {
+                _channel = channel;
+            }
+
+            public void OnCompleted()
+            {
+            }
+
+            public void OnError(Exception error)
+            {
+                _channel.OnResolverError(error);
+            }
+
+            public void OnNext(AddressResolverResult value)
+            {
+                _channel.OnResolverResult(value);
+            }
+        }
 
         public virtual void UpdateState(BalancerState state)
         {

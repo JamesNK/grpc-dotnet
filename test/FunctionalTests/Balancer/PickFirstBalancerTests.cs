@@ -75,7 +75,7 @@ namespace Grpc.Net.Client.Tests.Balancer
             // Arrange
             using var endpoint = BalancerHelpers.CreateGrpcEndpoint<HelloRequest, HelloReply>(50250, UnaryMethod, nameof(UnaryMethod));
 
-            var grpcConnection = new GrpcClientChannel(new StaticAddressResolver(new[] { new DnsEndPoint(endpoint.Address.Host, endpoint.Address.Port) }), LoggerFactory);
+            var grpcConnection = new ClientChannel(new StaticAddressResolver(new[] { new DnsEndPoint(endpoint.Address.Host, endpoint.Address.Port) }), LoggerFactory);
 
             var channel = GrpcChannel.ForAddress(endpoint.Address, new GrpcChannelOptions
             {
@@ -122,7 +122,7 @@ namespace Grpc.Net.Client.Tests.Balancer
             using var endpoint1 = BalancerHelpers.CreateGrpcEndpoint<HelloRequest, HelloReply>(50250, UnaryMethod, nameof(UnaryMethod));
             using var endpoint2 = BalancerHelpers.CreateGrpcEndpoint<HelloRequest, HelloReply>(50251, UnaryMethod, nameof(UnaryMethod));
 
-            var grpcConnection = new GrpcClientChannel(new StaticAddressResolver(new[]
+            var grpcConnection = new ClientChannel(new StaticAddressResolver(new[]
             {
                 new DnsEndPoint(endpoint1.Address.Host, endpoint1.Address.Port),
                 new DnsEndPoint(endpoint2.Address.Host, endpoint2.Address.Port)
@@ -172,7 +172,7 @@ namespace Grpc.Net.Client.Tests.Balancer
             using var endpoint1 = BalancerHelpers.CreateGrpcEndpoint<HelloRequest, HelloReply>(50250, UnaryMethod, nameof(UnaryMethod));
             using var endpoint2 = BalancerHelpers.CreateGrpcEndpoint<HelloRequest, HelloReply>(50251, UnaryMethod, nameof(UnaryMethod));
 
-            var grpcConnection = new GrpcClientChannel(new StaticAddressResolver(new[]
+            var grpcConnection = new ClientChannel(new StaticAddressResolver(new[]
             {
                 new DnsEndPoint(endpoint1.Address.Host, endpoint1.Address.Port),
                 new DnsEndPoint(endpoint2.Address.Host, endpoint2.Address.Port)
@@ -200,7 +200,7 @@ namespace Grpc.Net.Client.Tests.Balancer
 
             Logger.LogInformation($"Done sending gRPC calls");
 
-            var subConnection = (GrpcSubChannel)balancer!._subChannel!;
+            var subConnection = balancer!._subChannel!;
             var activeTransports = subConnection._activeTransports;
 
             // Assert

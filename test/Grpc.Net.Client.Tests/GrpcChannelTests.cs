@@ -91,22 +91,24 @@ namespace Grpc.Net.Client.Tests
             Assert.IsTrue(channel.IsSecure);
         }
 
-        [Test]
-        public void Build_SslCredentialsWithHttp_ThrowsError()
+        [TestCase("http://localhost")]
+        [TestCase("HTTP://localhost")]
+        public void Build_SslCredentialsWithHttp_ThrowsError(string address)
         {
             // Arrange & Act
-            var ex = Assert.Throws<InvalidOperationException>(() => GrpcChannel.ForAddress("http://localhost",
+            var ex = Assert.Throws<InvalidOperationException>(() => GrpcChannel.ForAddress(address,
                 CreateGrpcChannelOptions(o => o.Credentials = new SslCredentials())))!;
 
             // Assert
             Assert.AreEqual("Channel is configured with secure channel credentials and can't use a HttpClient with a 'http' scheme.", ex.Message);
         }
 
-        [Test]
-        public void Build_SslCredentialsWithArgs_ThrowsError()
+        [TestCase("https://localhost")]
+        [TestCase("HTTPS://localhost")]
+        public void Build_SslCredentialsWithArgs_ThrowsError(string address)
         {
             // Arrange & Act
-            var ex = Assert.Throws<InvalidOperationException>(() => GrpcChannel.ForAddress("https://localhost",
+            var ex = Assert.Throws<InvalidOperationException>(() => GrpcChannel.ForAddress(address,
                 CreateGrpcChannelOptions(o => o.Credentials = new SslCredentials("rootCertificates!!!"))))!;
 
             // Assert
@@ -395,6 +397,28 @@ namespace Grpc.Net.Client.Tests
 
 #if HAVE_LOAD_BALANCING
         [Test]
+        public void AddressResolver_NoChannelCredentials_Error()
+        {
+            // Arrange
+            var services = new ServiceCollection();
+            services.AddSingleton<AddressResolverFactory, TestAddressResolverFactory>();
+
+            var channelOptions = new GrpcChannelOptions
+            {
+                ServiceProvider = services.BuildServiceProvider()
+            };
+
+            // Act
+            var ex = Assert.Throws<InvalidOperationException>(() => GrpcChannel.ForAddress("test://localhost", channelOptions))!;
+
+            // Assert
+            Assert.AreEqual("Unable to determine the TLS configuration of the channel from address 'test://localhost/'. " +
+                "GrpcChannelOptions.Credentials must be specified when the address doesn't have a 'http' or 'https' scheme. " +
+                "To call TLS endpoints, set credentials to 'new SslCredentials()'. " +
+                "To call non-TLS endpoints, set credentials to 'ChannelCredentials.Insecure'.", ex.Message);
+        }
+
+        [Test]
         public void AddressResolver_MatchInServiceProvider_Success()
         {
             // Arrange
@@ -403,6 +427,7 @@ namespace Grpc.Net.Client.Tests
 
             var channelOptions = new GrpcChannelOptions
             {
+                Credentials = ChannelCredentials.Insecure,
                 ServiceProvider = services.BuildServiceProvider()
             };
 
@@ -421,6 +446,7 @@ namespace Grpc.Net.Client.Tests
 
             var channelOptions = new GrpcChannelOptions
             {
+                Credentials = ChannelCredentials.Insecure,
                 ServiceProvider = services.BuildServiceProvider()
             };
 

@@ -28,11 +28,11 @@ namespace Grpc.Net.Client.Balancer
 {
     public class PickFirstBalancer : LoadBalancer
     {
-        private readonly ClientChannel _channel;
+        private readonly IChannelControlHelper _channel;
         internal SubChannel? _subChannel;
         private ILogger _logger;
 
-        public PickFirstBalancer(ClientChannel channel, ILoggerFactory loggerFactory)
+        public PickFirstBalancer(IChannelControlHelper channel, ILoggerFactory loggerFactory)
         {
             _channel = channel;
             _logger = loggerFactory.CreateLogger<PickFirstBalancer>();

@@ -33,16 +33,16 @@ namespace Grpc.Net.Client.Balancer
 {
     public class RoundRobinBalancer : LoadBalancer
     {
-        private readonly ClientChannel _channel;
+        private readonly IChannelControlHelper _channel;
         private readonly IRandomGenerator _randomGenerator;
         private readonly List<(DnsEndPoint Address, SubChannel SubChannel)> _subChannels;
         private ILogger _logger;
 
-        public RoundRobinBalancer(ClientChannel channel, ILoggerFactory loggerFactory) : this(channel, loggerFactory, new RandomGenerator())
+        public RoundRobinBalancer(IChannelControlHelper channel, ILoggerFactory loggerFactory) : this(channel, loggerFactory, new RandomGenerator())
         {
         }
 
-        internal RoundRobinBalancer(ClientChannel channel, ILoggerFactory loggerFactory, IRandomGenerator randomGenerator)
+        internal RoundRobinBalancer(IChannelControlHelper channel, ILoggerFactory loggerFactory, IRandomGenerator randomGenerator)
         {
             _subChannels = new List<(DnsEndPoint Address, SubChannel SubChannel)>();
             _channel = channel;

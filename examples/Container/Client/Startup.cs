@@ -44,7 +44,7 @@ namespace Client
                 }
 
                 var loggerFactory = services.GetRequiredService<ILoggerFactory>();
-                var grpcConnection = new GrpcConnection(new DnsAddressResolver(new Uri(backendUrl), loggerFactory), loggerFactory);
+                var grpcConnection = new ClientChannel(new DnsAddressResolver(new Uri(backendUrl), loggerFactory), loggerFactory);
                 grpcConnection.ConfigureBalancer(c => new RoundRobinBalancer(c, loggerFactory));
 
                 return grpcConnection;
@@ -52,7 +52,7 @@ namespace Client
 
             services.AddSingleton(services =>
             {
-                var grpcConnection = services.GetRequiredService<GrpcConnection>();
+                var grpcConnection = services.GetRequiredService<ClientChannel>();
                 var loggerFactory = services.GetRequiredService<ILoggerFactory>();
 
                 var channel = GrpcChannel.ForAddress("http://localhost", new GrpcChannelOptions

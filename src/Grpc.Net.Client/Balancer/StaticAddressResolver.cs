@@ -22,6 +22,7 @@ using System.Linq;
 using System.Net;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.Extensions.Logging;
 
 #if HAVE_LOAD_BALANCING
 #pragma warning disable CS1591 // Missing XML comment for publicly visible type or member
@@ -89,6 +90,23 @@ namespace Grpc.Net.Client.Balancer
             {
                 _nameResolver.Unsubscribe(_observer);
             }
+        }
+    }
+
+    public class StaticAddressResolverFactory : AddressResolverFactory
+    {
+        private readonly IEnumerable<DnsEndPoint> _addresses;
+
+        public StaticAddressResolverFactory(IEnumerable<DnsEndPoint> addresses)
+        {
+            _addresses = addresses;
+        }
+
+        public override string Name => "static";
+
+        public override AddressResolver Create(Uri address, AddressResolverOptions options)
+        {
+            return new StaticAddressResolver(_addresses);
         }
     }
 }

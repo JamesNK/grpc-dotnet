@@ -1,6 +1,6 @@
 ﻿@page "/fetchdata"
 @inject GrpcChannel Channel
-@inject Grpc.Net.Client.Balancer.GrpcConnection Connection
+@inject Grpc.Net.Client.Balancer.ClientChannel Connection
 @inject ILoggerFactory LoggerFactory
 @using Google.Protobuf.WellKnownTypes
 @using Microsoft.Extensions.Logging
@@ -67,7 +67,7 @@ else
 
 @code {
     private IList<WeatherForecast>? forecasts;
-    private IList<Grpc.Net.Client.Balancer.SubConnection> subConnections = default!;
+    private IList<Grpc.Net.Client.Balancer.SubChannel> subConnections = default!;
     private Grpc.Net.Client.Balancer.ConnectivityState connectionState;
     private CancellationTokenSource cts = default!;
     private string? server;

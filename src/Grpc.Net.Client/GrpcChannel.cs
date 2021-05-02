@@ -32,8 +32,11 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Grpc.Net.Client.Internal.Retry;
 using System.Threading;
 using System.Diagnostics;
+using System.Net;
+using System.Threading.Tasks;
 #if HAVE_LOAD_BALANCING
 using Grpc.Net.Client.Balancer;
+using Grpc.Net.Client.Balancer.Internal;
 #endif
 
 namespace Grpc.Net.Client
@@ -77,7 +80,8 @@ namespace Grpc.Net.Client
 
 #if HAVE_LOAD_BALANCING
         // Load balancing
-        internal AddressResolver? AddressResolver { get; }
+        internal AddressResolver AddressResolver { get; }
+        internal ClientChannel ClientChannel { get; }
 #endif
 
         // Stateful
@@ -104,6 +108,23 @@ namespace Grpc.Net.Client
                 || channelOptions.DisposeHttpClient;
 
             Address = address;
+            LoggerFactory = channelOptions.LoggerFactory ??
+                (ILoggerFactory?)channelOptions.ServiceProvider?.GetService(typeof(ILoggerFactory)) ??
+                NullLoggerFactory.Instance;
+
+#if HAVE_LOAD_BALANCING
+            if (Address.Scheme == Uri.UriSchemeHttps || Address.Scheme == Uri.UriSchemeHttp)
+            {
+                AddressResolver = new StaticAddressResolver(new[] { new DnsEndPoint(Address.Host, Address.Port) });
+            }
+            else
+            {
+                AddressResolver = CreateAddressResolver(channelOptions.ServiceProvider);
+            }
+
+            ClientChannel = new ClientChannel(AddressResolver, LoggerFactory);
+#endif
+
             HttpInvoker = channelOptions.HttpClient ?? CreateInternalHttpInvoker(channelOptions.HttpHandler);
             IsWinHttp = channelOptions.HttpHandler != null ? HttpHandlerFactory.HasHttpHandlerType(channelOptions.HttpHandler, "System.Net.Http.WinHttpHandler") : false;
             SendMaxMessageSize = channelOptions.MaxSendMessageSize;
@@ -113,7 +134,6 @@ namespace Grpc.Net.Client
             MaxRetryBufferPerCallSize = channelOptions.MaxRetryBufferPerCallSize;
             CompressionProviders = ResolveCompressionProviders(channelOptions.CompressionProviders);
             MessageAcceptEncoding = GrpcProtocolHelpers.GetMessageAcceptEncoding(CompressionProviders);
-            LoggerFactory = channelOptions.LoggerFactory ?? NullLoggerFactory.Instance;
             Logger = LoggerFactory.CreateLogger<GrpcChannel>();
             ThrowOperationCanceledOnCancellation = channelOptions.ThrowOperationCanceledOnCancellation;
             _createMethodInfoFunc = CreateMethodInfo;
@@ -135,18 +155,24 @@ namespace Grpc.Net.Client
 
                 ValidateChannelCredentials();
             }
-
-#if HAVE_LOAD_BALANCING
-            if (string.Equals(Address.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(Address.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase))
-            {
-
-            }
             else
             {
-                AddressResolver = CreateAddressResolver(channelOptions.ServiceProvider);
+                if (Address.Scheme == Uri.UriSchemeHttp)
+                {
+                    IsSecure = false;
+                }
+                else if (Address.Scheme == Uri.UriSchemeHttps)
+                {
+                    IsSecure = true;
+                }
+                else
+                {
+                    throw new InvalidOperationException($"Unable to determine the TLS configuration of the channel from address '{Address}'. " +
+                        $"{nameof(GrpcChannelOptions)}.{nameof(GrpcChannelOptions.Credentials)} must be specified when the address doesn't have a 'http' or 'https' scheme. " +
+                        "To call TLS endpoints, set credentials to 'new SslCredentials()'. " +
+                        "To call non-TLS endpoints, set credentials to 'ChannelCredentials.Insecure'.");
+                }
             }
-#endif
 
             if (!string.IsNullOrEmpty(Address.PathAndQuery) && Address.PathAndQuery != "/")
             {
@@ -213,7 +239,7 @@ namespace Grpc.Net.Client
             return configs;
         }
 
-        private static HttpMessageInvoker CreateInternalHttpInvoker(HttpMessageHandler? handler)
+        private HttpMessageInvoker CreateInternalHttpInvoker(HttpMessageHandler? handler)
         {
             // HttpMessageInvoker should always dispose handler if Disposed is called on it.
             // Decision to dispose invoker is controlled by _shouldDisposeHttpClient.
@@ -224,6 +250,10 @@ namespace Grpc.Net.Client
 
 #if NET5_0
             handler = HttpHandlerFactory.EnsureTelemetryHandler(handler);
+#endif
+
+#if HAVE_LOAD_BALANCING
+            handler = new BalancerHttpHandler(handler, ClientChannel);
 #endif
 
             // Use HttpMessageInvoker instead of HttpClient because it is faster
@@ -463,6 +493,13 @@ namespace Grpc.Net.Client
                 return _random.Next(minValue, maxValue);
             }
         }
+
+#if HAVE_LOAD_BALANCING
+        internal Task ConnectAsync(CancellationToken cancellationToken = default)
+        {
+            return ClientChannel.ConnectAsync(cancellationToken);
+        }
+#endif
 
         private struct MethodKey : IEquatable<MethodKey>
         {

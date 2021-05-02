@@ -17,7 +17,6 @@
 #endregion
 
 #if HAVE_LOAD_BALANCING
-#pragma warning disable CS1591 // Missing XML comment for publicly visible type or member
 
 using System;
 using System.IO;
@@ -26,9 +25,9 @@ using System.Threading;
 using System.Threading.Tasks;
 using Grpc.Shared;
 
-namespace Grpc.Net.Client.Balancer
+namespace Grpc.Net.Client.Balancer.Internal
 {
-    public class BalancerHttpHandler : DelegatingHandler
+    internal class BalancerHttpHandler : DelegatingHandler
     {
         private readonly ClientChannel _clientConnection;
         private static readonly HttpRequestOptionsKey<SubChannel> _requestOptionsSubConnectionKey = new HttpRequestOptionsKey<SubChannel>(nameof(SubChannel));
@@ -39,12 +38,10 @@ namespace Grpc.Net.Client.Balancer
             _clientConnection = clientConnection;
 
             var socketsHttpHandler = (SocketsHttpHandler?)HttpHandlerFactory.GetHttpHandlerType(innerHandler, "System.Net.Http.SocketsHttpHandler");
-            if (socketsHttpHandler == null)
+            if (socketsHttpHandler != null)
             {
-                throw new InvalidOperationException();
+                socketsHttpHandler.ConnectCallback = OnConnect;
             }
-
-            socketsHttpHandler.ConnectCallback = OnConnect;
         }
 
         private async ValueTask<Stream> OnConnect(SocketsHttpConnectionContext context, CancellationToken cancellationToken)
@@ -76,8 +73,6 @@ namespace Grpc.Net.Client.Balancer
             return await base.SendAsync(request, cancellationToken).ConfigureAwait(false);
         }
     }
-
 }
 
-#pragma warning restore CS1591 // Missing XML comment for publicly visible type or member
 #endif
