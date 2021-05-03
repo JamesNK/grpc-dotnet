@@ -106,14 +106,7 @@ namespace Grpc.Net.Client.Tests.Balancer
                 endpointName);
         }
 
-        public static BalancerHttpHandler CreateBalancerHandler(ClientChannel grpcConnection, ILoggerFactory loggerFactory, HttpMessageHandler? innerHandler = null)
-        {
-            return new BalancerHttpHandler(
-                innerHandler ?? new SocketsHttpHandler { EnableMultipleHttp2Connections = true },
-                grpcConnection);
-        }
-
-        public static async Task<GrpcChannel> CreateChannel(ILoggerFactory loggerFactory, LoadBalancingConfig? loadBalancingConfig, params Uri[] endpoints)
+        public static async Task<GrpcChannel> CreateChannel(ILoggerFactory loggerFactory, LoadBalancingConfig? loadBalancingConfig, Uri[] endpoints)
         {
             var e = endpoints.Select(i => new DnsEndPoint(i.Host, i.Port)).ToArray();
 

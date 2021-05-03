@@ -37,6 +37,7 @@ namespace Grpc.Net.Client.Balancer
         private ConnectivityState _state;
         private readonly AddressResolver _resolver;
         private readonly ILoggerFactory _loggerFactory;
+        private readonly ISubChannelTransportFactory _subChannelTransportFactory;
         private IDisposable? _resolverSubscription;
         private List<SubChannel> _subChannels;
 
@@ -49,6 +50,11 @@ namespace Grpc.Net.Client.Balancer
         private readonly object _lock;
 
         public ClientChannel(AddressResolver resolver, ILoggerFactory loggerFactory)
+            : this(resolver, loggerFactory, DefaultSubChannelTransportFactory.Instance)
+        {
+        }
+
+        internal ClientChannel(AddressResolver resolver, ILoggerFactory loggerFactory, ISubChannelTransportFactory subChannelTransportFactory)
         {
             _lock = new object();
             _nextPickerLock = new SemaphoreSlim(1);
@@ -59,6 +65,7 @@ namespace Grpc.Net.Client.Balancer
             _subChannels = new List<SubChannel>();
             _resolver = resolver;
             _loggerFactory = loggerFactory;
+            _subChannelTransportFactory = subChannelTransportFactory;
         }
 
         public ConnectivityState State => _state;
@@ -80,7 +87,7 @@ namespace Grpc.Net.Client.Balancer
         public SubChannel CreateSubChannel(SubChannelOptions options)
         {
             var subChannel = new SubChannel(this, options.Addresses);
-            subChannel.Transport = new ActiveHealthTransport(subChannel);
+            subChannel.Transport = _subChannelTransportFactory.Create(subChannel);
 
             Logger.LogInformation("Created sub-channel: " + subChannel);
 
@@ -189,7 +196,7 @@ namespace Grpc.Net.Client.Balancer
 
                 if (!Equals(_picker, state.Picker))
                 {
-                    Logger.LogInformation("Updating picker");
+                    Logger.LogInformation("Updating picker: " + state.Picker);
                     _picker = state.Picker;
                     _nextPickerTcs.TrySetResult(state.Picker);
                 }

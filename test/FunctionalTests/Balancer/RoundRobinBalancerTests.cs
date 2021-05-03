@@ -69,7 +69,7 @@ namespace Grpc.Net.Client.Tests.Balancer
             // Arrange
             using var endpoint = BalancerHelpers.CreateGrpcEndpoint<HelloRequest, HelloReply>(50250, UnaryMethod, nameof(UnaryMethod));
 
-            var channel = await BalancerHelpers.CreateChannel(LoggerFactory, new RoundRobinConfig(), endpoint.Address);
+            var channel = await BalancerHelpers.CreateChannel(LoggerFactory, new RoundRobinConfig(), new[] { endpoint.Address });
 
             var client = TestClientFactory.Create(channel, endpoint.Method);
 
@@ -112,7 +112,7 @@ namespace Grpc.Net.Client.Tests.Balancer
             using var endpoint1 = BalancerHelpers.CreateGrpcEndpoint<HelloRequest, HelloReply>(50250, UnaryMethod, nameof(UnaryMethod));
             using var endpoint2 = BalancerHelpers.CreateGrpcEndpoint<HelloRequest, HelloReply>(50251, UnaryMethod, nameof(UnaryMethod));
 
-            var channel = await BalancerHelpers.CreateChannel(LoggerFactory, new RoundRobinConfig(), endpoint1.Address, endpoint2.Address);
+            var channel = await BalancerHelpers.CreateChannel(LoggerFactory, new RoundRobinConfig(), new[] { endpoint1.Address, endpoint2.Address });
 
             await TestHelpers.AssertIsTrueRetryAsync(() =>
             {
@@ -161,7 +161,13 @@ namespace Grpc.Net.Client.Tests.Balancer
             using var endpoint1 = BalancerHelpers.CreateGrpcEndpoint<HelloRequest, HelloReply>(50250, UnaryMethod, nameof(UnaryMethod));
             using var endpoint2 = BalancerHelpers.CreateGrpcEndpoint<HelloRequest, HelloReply>(50251, UnaryMethod, nameof(UnaryMethod));
 
-            var channel = await BalancerHelpers.CreateChannel(LoggerFactory, new RoundRobinConfig(), endpoint1.Address, endpoint2.Address);
+            var channel = await BalancerHelpers.CreateChannel(LoggerFactory, new RoundRobinConfig(), new[] { endpoint1.Address, endpoint2.Address });
+
+            await TestHelpers.AssertIsTrueRetryAsync(() =>
+            {
+                var picker = channel.ClientChannel._picker as RoundRobinPicker;
+                return picker?._subChannels.Count == 2;
+            }, "Wait for all subconnections to be connected.").DefaultTimeout();
 
             var client = TestClientFactory.Create(channel, endpoint1.Method);
 

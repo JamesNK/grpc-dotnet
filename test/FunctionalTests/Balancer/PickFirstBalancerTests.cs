@@ -31,6 +31,7 @@ using Grpc.AspNetCore.FunctionalTests.Infrastructure;
 using Grpc.Core;
 using Grpc.Net.Client.Balancer;
 using Grpc.Net.Client.Balancer.Internal;
+using Grpc.Net.Client.Configuration;
 using Grpc.Net.Client.Web;
 using Grpc.Tests.Shared;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
@@ -76,13 +77,7 @@ namespace Grpc.Net.Client.Tests.Balancer
             // Arrange
             using var endpoint = BalancerHelpers.CreateGrpcEndpoint<HelloRequest, HelloReply>(50250, UnaryMethod, nameof(UnaryMethod));
 
-            var grpcConnection = new ClientChannel(new StaticAddressResolver(new[] { new DnsEndPoint(endpoint.Address.Host, endpoint.Address.Port) }), LoggerFactory);
-
-            var channel = GrpcChannel.ForAddress(endpoint.Address, new GrpcChannelOptions
-            {
-                LoggerFactory = LoggerFactory,
-                HttpHandler = BalancerHelpers.CreateBalancerHandler(grpcConnection, LoggerFactory)
-            });
+            var channel = await BalancerHelpers.CreateChannel(LoggerFactory, new PickFirstConfig(), new[] { endpoint.Address });
 
             var client = TestClientFactory.Create(channel, endpoint.Method);
 
@@ -123,17 +118,7 @@ namespace Grpc.Net.Client.Tests.Balancer
             using var endpoint1 = BalancerHelpers.CreateGrpcEndpoint<HelloRequest, HelloReply>(50250, UnaryMethod, nameof(UnaryMethod));
             using var endpoint2 = BalancerHelpers.CreateGrpcEndpoint<HelloRequest, HelloReply>(50251, UnaryMethod, nameof(UnaryMethod));
 
-            var grpcConnection = new ClientChannel(new StaticAddressResolver(new[]
-            {
-                new DnsEndPoint(endpoint1.Address.Host, endpoint1.Address.Port),
-                new DnsEndPoint(endpoint2.Address.Host, endpoint2.Address.Port)
-            }), LoggerFactory);
-
-            var channel = GrpcChannel.ForAddress(endpoint1.Address, new GrpcChannelOptions
-            {
-                LoggerFactory = LoggerFactory,
-                HttpHandler = BalancerHelpers.CreateBalancerHandler(grpcConnection, LoggerFactory)
-            });
+            var channel = await BalancerHelpers.CreateChannel(LoggerFactory, new PickFirstConfig(), new[] { endpoint1.Address, endpoint2.Address });
 
             var client = TestClientFactory.Create(channel, endpoint1.Method);
 
@@ -173,20 +158,8 @@ namespace Grpc.Net.Client.Tests.Balancer
             using var endpoint1 = BalancerHelpers.CreateGrpcEndpoint<HelloRequest, HelloReply>(50250, UnaryMethod, nameof(UnaryMethod));
             using var endpoint2 = BalancerHelpers.CreateGrpcEndpoint<HelloRequest, HelloReply>(50251, UnaryMethod, nameof(UnaryMethod));
 
-            var grpcConnection = new ClientChannel(new StaticAddressResolver(new[]
-            {
-                new DnsEndPoint(endpoint1.Address.Host, endpoint1.Address.Port),
-                new DnsEndPoint(endpoint2.Address.Host, endpoint2.Address.Port)
-            }), LoggerFactory);
-
-            PickFirstBalancer? balancer = null;
-            grpcConnection.ConfigureBalancer(c => balancer = new PickFirstBalancer(c, LoggerFactory));
-
-            var channel = GrpcChannel.ForAddress(endpoint1.Address, new GrpcChannelOptions
-            {
-                LoggerFactory = LoggerFactory,
-                HttpHandler = BalancerHelpers.CreateBalancerHandler(grpcConnection, LoggerFactory)
-            });
+            var channel = await BalancerHelpers.CreateChannel(LoggerFactory, new PickFirstConfig(), new[] { endpoint1.Address, endpoint2.Address });
+            var balancer = (PickFirstBalancer)channel.ClientChannel._balancer!;
 
             var client = TestClientFactory.Create(channel, endpoint1.Method);
 
@@ -202,7 +175,7 @@ namespace Grpc.Net.Client.Tests.Balancer
             Logger.LogInformation($"Done sending gRPC calls");
 
             var subChannel = balancer!._subChannel!;
-            var transport = (ActiveHealthTransport)subChannel.Transport;
+            var transport = (DefaultSubChannelTransport)subChannel.Transport;
             var activeStreams = transport._activeStreams;
 
             // Assert

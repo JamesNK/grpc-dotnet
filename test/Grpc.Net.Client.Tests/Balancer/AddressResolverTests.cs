@@ -34,6 +34,8 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.DependencyInjection;
 using System.Net;
 using System.Collections.Generic;
+using Grpc.Net.Client.Balancer.Internal;
+using System.IO;
 #if HAVE_LOAD_BALANCING
 using Grpc.Net.Client.Balancer;
 #endif
@@ -52,6 +54,7 @@ namespace Grpc.Net.Client.Tests.Balancer
             {
                 new DnsEndPoint("localhost", 80)
             }));
+            services.AddSingleton<ISubChannelTransportFactory>(new TestSubChannelTransportFactory());
 
             var channelOptions = new GrpcChannelOptions
             {
@@ -66,6 +69,41 @@ namespace Grpc.Net.Client.Tests.Balancer
             // Assert
             var subChannels = channel.ClientChannel.GetSubChannels();
             Assert.AreEqual(1, subChannels.Count);
+        }
+
+        private class TestSubChannelTransportFactory : ISubChannelTransportFactory
+        {
+            public ISubChannelTransport Create(SubChannel subChannel)
+            {
+                return new TestSubChannelTransport();
+            }
+        }
+
+        private class TestSubChannelTransport : ISubChannelTransport
+        {
+            public DnsEndPoint? CurrentEndPoint { get; }
+
+            public void Dispose()
+            {
+            }
+
+            public ValueTask<Stream> GetStreamAsync(DnsEndPoint endPoint, CancellationToken cancellationToken)
+            {
+                return new ValueTask<Stream>(new MemoryStream());
+            }
+
+            public void OnRequestError(Exception ex)
+            {
+            }
+
+            public void OnRequestSuccess()
+            {
+            }
+
+            public ValueTask<bool> TryConnectAsync(CancellationToken cancellationToken)
+            {
+                return new ValueTask<bool>(true);
+            }
         }
     }
 }

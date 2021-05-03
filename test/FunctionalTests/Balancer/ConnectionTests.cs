@@ -96,7 +96,7 @@ namespace Grpc.Net.Client.Tests.Balancer
 
             // Act
             grpcWebHandler.HttpVersion = new Version(1, 1);
-            var http11CallTasks = new List<Task>();
+            var http11CallTasks = new List<Task<HelloReply>>();
             for (int i = 0; i < 10; i++)
             {
                 Logger.LogInformation($"Sending gRPC call {i}");
@@ -107,7 +107,7 @@ namespace Grpc.Net.Client.Tests.Balancer
             Logger.LogInformation($"Done sending gRPC calls");
 
             var subChannel = balancer._subChannel!;
-            var transport = (ActiveHealthTransport)subChannel.Transport;
+            var transport = (DefaultSubChannelTransport)subChannel.Transport;
             var activeStreams = transport._activeStreams;
 
             // Assert
@@ -119,7 +119,7 @@ namespace Grpc.Net.Client.Tests.Balancer
 
             // Act
             grpcWebHandler.HttpVersion = new Version(2, 0);
-            var http2CallTasks = new List<Task>();
+            var http2CallTasks = new List<Task<HelloReply>>();
             for (int i = 0; i < 10; i++)
             {
                 Logger.LogInformation($"Sending gRPC call {i}");

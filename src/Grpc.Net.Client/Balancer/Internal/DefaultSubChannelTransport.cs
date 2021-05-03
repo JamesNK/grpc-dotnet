@@ -17,7 +17,6 @@
 #endregion
 
 #if HAVE_LOAD_BALANCING
-#pragma warning disable CS1591 // Missing XML comment for publicly visible type or member
 
 using System;
 using System.Collections.Generic;
@@ -31,19 +30,7 @@ using Microsoft.Extensions.Logging;
 
 namespace Grpc.Net.Client.Balancer.Internal
 {
-    internal interface ITransport : IDisposable
-    {
-        void OnRequestError(Exception ex);
-        void OnRequestSuccess();
-        DnsEndPoint? CurrentEndPoint { get; }
-
-#if NET5_0_OR_GREATER
-        ValueTask<Stream> GetStreamAsync(DnsEndPoint endPoint, CancellationToken cancellationToken);
-#endif
-        ValueTask<bool> TryConnectAsync(CancellationToken cancellationToken);
-    }
-
-    internal class ActiveHealthTransport : ITransport, IDisposable
+    internal class DefaultSubChannelTransport : ISubChannelTransport, IDisposable
     {
         private readonly SemaphoreSlim _connectionCreateLock;
         private readonly SubChannel _subChannel;
@@ -56,7 +43,7 @@ namespace Grpc.Net.Client.Balancer.Internal
 #endif
         private DnsEndPoint? _currentEndPoint;
 
-        public ActiveHealthTransport(SubChannel subChannel)
+        public DefaultSubChannelTransport(SubChannel subChannel)
         {
             _connectionCreateLock = new SemaphoreSlim(1);
             _subChannel = subChannel;
@@ -94,10 +81,10 @@ namespace Grpc.Net.Client.Balancer.Internal
                 Exception? firstConnectionError = null;
 
 #pragma warning disable CS0162 // Unreachable code detected
-                for (int i = _lastEndPointIndex; (i - _lastEndPointIndex) < _subChannel._addresses.Count; i++)
+                for (var i = 0; i < _subChannel._addresses.Count; i++)
 #pragma warning restore CS0162 // Unreachable code detected
                 {
-                    var currentIndex = (i + _subChannel._addresses.Count) % _subChannel._addresses.Count;
+                    var currentIndex = (i + _lastEndPointIndex + 1) % _subChannel._addresses.Count;
                     var currentEndPoint = _subChannel._addresses[currentIndex];
 
 #if NET5_0_OR_GREATER
@@ -287,5 +274,4 @@ namespace Grpc.Net.Client.Balancer.Internal
     }
 }
 
-#pragma warning restore CS1591 // Missing XML comment for publicly visible type or member
 #endif

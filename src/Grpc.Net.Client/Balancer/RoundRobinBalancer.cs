@@ -218,7 +218,7 @@ namespace Grpc.Net.Client.Balancer
         }
     }
 
-    internal class RoundRobinPicker : SubChannelPicker
+    internal class RoundRobinPicker : SubChannelPicker, IEquatable<RoundRobinPicker>
     {
         // Internal for testing
         internal readonly List<(DnsEndPoint Address, SubChannel SubChannel)> _subChannels;
@@ -230,12 +230,50 @@ namespace Grpc.Net.Client.Balancer
             _pickCount = pickCount;
         }
 
+        public bool Equals(RoundRobinPicker? other)
+        {
+            if (other == null || _subChannels.Count != other._subChannels.Count)
+            {
+                return false;
+            }
+
+            for (var i = 0; i < _subChannels.Count; i++)
+            {
+                if (!Equals(_subChannels[i], other._subChannels[i]))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        public override bool Equals(object? obj)
+        {
+            return Equals(obj as RoundRobinPicker);
+        }
+
+        public override int GetHashCode()
+        {
+            int hashCode = 0;
+            for (var i = 0; i < _subChannels.Count; i++)
+            {
+                hashCode ^= _subChannels[i].GetHashCode();
+            }
+            return hashCode;
+        }
+
         public override PickResult Pick(PickContext context)
         {
             var c = Interlocked.Increment(ref _pickCount);
             var index = (c - 1) % _subChannels.Count;
 
             return new PickResult(_subChannels[(int)index].SubChannel, c => { });
+        }
+
+        public override string ToString()
+        {
+            return string.Join(", ", _subChannels.Select(s => s.Address));
         }
     }
 

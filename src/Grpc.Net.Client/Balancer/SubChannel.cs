@@ -39,7 +39,7 @@ namespace Grpc.Net.Client.Balancer
         internal readonly List<DnsEndPoint> _addresses;
         internal ILogger Logger => _channel.Logger;
         internal readonly object Lock;
-        internal ITransport Transport { get; set; } = default!;
+        internal ISubChannelTransport Transport { get; set; } = default!;
 
         private readonly ClientChannel _channel;
 

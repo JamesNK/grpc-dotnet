@@ -126,7 +126,9 @@ namespace Grpc.Net.Client
                 AddressResolver = CreateAddressResolver(channelOptions.ServiceProvider);
             }
 
-            ClientChannel = new ClientChannel(AddressResolver, LoggerFactory);
+            var transportFactory = ResolveService<ISubChannelTransportFactory>(channelOptions.ServiceProvider, DefaultSubChannelTransportFactory.Instance);
+
+            ClientChannel = new ClientChannel(AddressResolver, LoggerFactory, transportFactory);
             ClientChannel.ConfigureBalancer(c =>
             {
                 if (channelOptions.ServiceConfig != null)
