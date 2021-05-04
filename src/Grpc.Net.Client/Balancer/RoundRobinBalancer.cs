@@ -26,6 +26,7 @@ using System.Net;
 using System.Threading;
 using System.Threading.Tasks;
 using Grpc.Net.Client.Balancer.Internal;
+using Grpc.Net.Client.Configuration;
 using Grpc.Net.Client.Internal;
 using Microsoft.Extensions.Logging;
 
@@ -277,6 +278,15 @@ namespace Grpc.Net.Client.Balancer
         }
     }
 
+    public class RoundRobinBalancerFactory : LoadBalancerFactory
+    {
+        public override string Name { get; } = LoadBalancingConfig.RoundRobinPolicyName;
+
+        public override LoadBalancer Create(IChannelControlHelper channelControlHelper, ILoggerFactory loggerFactory, IDictionary<string, object> options)
+        {
+            return new RoundRobinBalancer(channelControlHelper, loggerFactory);
+        }
+    }
 }
 
 #pragma warning restore CS1591 // Missing XML comment for publicly visible type or member

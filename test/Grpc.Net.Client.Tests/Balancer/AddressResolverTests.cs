@@ -50,10 +50,14 @@ namespace Grpc.Net.Client.Tests.Balancer
         {
             // Arrange
             var services = new ServiceCollection();
-            services.AddSingleton<AddressResolverFactory>(new StaticAddressResolverFactory(new List<DnsEndPoint>
+
+            var addressResolver = new TestAddressResolver();
+            addressResolver.UpdateEndPoints(new List<DnsEndPoint>
             {
                 new DnsEndPoint("localhost", 80)
-            }));
+            });
+
+            services.AddSingleton<AddressResolverFactory>(new TestAddressResolverFactory(addressResolver));
             services.AddSingleton<ISubChannelTransportFactory>(new TestSubChannelTransportFactory());
 
             var channelOptions = new GrpcChannelOptions
@@ -63,12 +67,105 @@ namespace Grpc.Net.Client.Tests.Balancer
             };
 
             // Act
-            var channel = GrpcChannel.ForAddress("static://localhost", channelOptions);
+            var channel = GrpcChannel.ForAddress("test://localhost", channelOptions);
             await channel.ConnectAsync();
 
             // Assert
             var subChannels = channel.ClientChannel.GetSubChannels();
             Assert.AreEqual(1, subChannels.Count);
+        }
+
+        [Test]
+        public async Task AddressResolver_WaitForRefreshAsync_Success()
+        {
+            // Arrange
+            var services = new ServiceCollection();
+            var tcs = new TaskCompletionSource<object?>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            var addressResolver = new TestAddressResolver(tcs.Task);
+            addressResolver.UpdateEndPoints(new List<DnsEndPoint>
+            {
+                new DnsEndPoint("localhost", 80)
+            });
+
+            services.AddSingleton<AddressResolverFactory>(new TestAddressResolverFactory(addressResolver));
+            services.AddSingleton<ISubChannelTransportFactory>(new TestSubChannelTransportFactory());
+
+            var channelOptions = new GrpcChannelOptions
+            {
+                Credentials = ChannelCredentials.Insecure,
+                ServiceProvider = services.BuildServiceProvider()
+            };
+
+            // Act
+            var channel = GrpcChannel.ForAddress("test://localhost", channelOptions);
+            var connectTask = channel.ConnectAsync();
+
+            // Assert
+            Assert.IsFalse(connectTask.IsCompleted);
+
+            tcs.SetResult(null);
+
+            await connectTask.DefaultTimeout();
+
+            var subChannels = channel.ClientChannel.GetSubChannels();
+            Assert.AreEqual(1, subChannels.Count);
+        }
+
+        private class TestAddressResolverFactory : AddressResolverFactory
+        {
+            private readonly TestAddressResolver _addressResolver;
+
+            public override string Name { get; } = "test";
+
+            public TestAddressResolverFactory(TestAddressResolver addressResolver)
+            {
+                _addressResolver = addressResolver;
+            }
+
+            public override AddressResolver Create(Uri address, AddressResolverOptions options)
+            {
+                return _addressResolver;
+            }
+        }
+
+        private class TestAddressResolver : AddressResolver, IDisposable
+        {
+            private readonly Task? _refreshAsyncTask;
+            private IObserver<AddressResolverResult>? _observer;
+            private IReadOnlyList<DnsEndPoint>? _endPoints;
+
+            public TestAddressResolver(Task? refreshAsyncTask = null)
+            {
+                _refreshAsyncTask = refreshAsyncTask;
+            }
+
+            public void UpdateEndPoints(List<DnsEndPoint> endPoints)
+            {
+                _endPoints = endPoints;
+                _observer?.OnNext(new AddressResolverResult(_endPoints));
+            }
+
+            public void Dispose()
+            {
+                _observer = null;
+            }
+
+            public override Task RefreshAsync(CancellationToken cancellationToken)
+            {
+                return _refreshAsyncTask ?? Task.CompletedTask;
+            }
+
+            public override void Shutdown()
+            {
+            }
+
+            public override IDisposable Subscribe(IObserver<AddressResolverResult> observer)
+            {
+                _observer = observer;
+                _observer.OnNext(new AddressResolverResult(_endPoints ?? Array.Empty<DnsEndPoint>()));
+                return this;
+            }
         }
 
         private class TestSubChannelTransportFactory : ISubChannelTransportFactory

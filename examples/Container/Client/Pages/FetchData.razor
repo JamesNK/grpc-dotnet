@@ -1,6 +1,6 @@
 ﻿@page "/fetchdata"
 @inject GrpcChannel Channel
-@inject Grpc.Net.Client.Balancer.ClientChannel Connection
+@inject ISubChannelReporter Connection
 @inject ILoggerFactory LoggerFactory
 @using Google.Protobuf.WellKnownTypes
 @using Microsoft.Extensions.Logging
@@ -41,14 +41,14 @@ else
     </p>
 }
 
-@if (subConnections != null)
+@if (subChannels != null)
 {
     <h3>Connection <span class="badge @GetStateClass(connectionState) badge-pill">@connectionState</span></h3>
 
     <div class="row">
         <div class="col-4">
             <ul class="list-group">
-                @foreach (var subConnection in subConnections)
+                @foreach (var subConnection in subChannels)
                 {
                     <li class="list-group-item d-flex justify-content-between align-items-center">
                         @string.Join(", ", subConnection.GetAddresses().Select(FormatAddress))
@@ -67,7 +67,7 @@ else
 
 @code {
     private IList<WeatherForecast>? forecasts;
-    private IList<Grpc.Net.Client.Balancer.SubChannel> subConnections = default!;
+    private IList<Grpc.Net.Client.Balancer.SubChannel> subChannels = default!;
     private Grpc.Net.Client.Balancer.ConnectivityState connectionState;
     private CancellationTokenSource cts = default!;
     private string? server;
@@ -115,8 +115,8 @@ else
         {
             await InvokeAsync(() =>
             {
-                connectionState = Connection.State;
-                subConnections = Connection.GetSubConnections();
+                connectionState = Grpc.Net.Client.Balancer.ConnectivityState.Ready;
+                subChannels = Connection.SubChannels;
                 StateHasChanged();
             });
 

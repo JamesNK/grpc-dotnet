@@ -61,15 +61,19 @@ namespace Grpc.Net.Client.Balancer.Internal
 
         public void OnRequestError(Exception ex)
         {
-            throw new NotImplementedException();
         }
 
         public void OnRequestSuccess()
         {
-            throw new NotImplementedException();
         }
 
-        public async ValueTask<bool> TryConnectAsync(CancellationToken cancellationToken)
+        public async
+#if !NETSTANDARD2_0
+            ValueTask<bool>
+#else
+            Task<bool>
+#endif
+            TryConnectAsync(CancellationToken cancellationToken)
         {
             Debug.Assert(_subChannel._addresses.Count > 0);
             Debug.Assert(CurrentEndPoint == null);

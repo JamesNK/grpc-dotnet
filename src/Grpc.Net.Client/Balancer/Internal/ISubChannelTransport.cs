@@ -39,7 +39,13 @@ namespace Grpc.Net.Client.Balancer.Internal
 #if NET5_0_OR_GREATER
         ValueTask<Stream> GetStreamAsync(DnsEndPoint endPoint, CancellationToken cancellationToken);
 #endif
-        ValueTask<bool> TryConnectAsync(CancellationToken cancellationToken);
+
+#if !NETSTANDARD2_0
+        ValueTask<bool>
+#else
+        Task<bool>
+#endif
+            TryConnectAsync(CancellationToken cancellationToken);
     }
 
     internal interface ISubChannelTransportFactory

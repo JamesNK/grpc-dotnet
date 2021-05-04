@@ -20,6 +20,8 @@
 #pragma warning disable CS1591 // Missing XML comment for publicly visible type or member
 
 using System;
+using System.Collections.Generic;
+using Microsoft.Extensions.Logging;
 
 namespace Grpc.Net.Client.Balancer
 {
@@ -27,7 +29,7 @@ namespace Grpc.Net.Client.Balancer
     {
         public abstract void UpdateChannelState(ChannelState state);
         public abstract void ResolverError(Exception exception);
-        public abstract void UpdateSubChannelState(SubChannel subConnection, SubChannelState state);
+        public abstract void UpdateSubChannelState(SubChannel subChannel, SubChannelState state);
         public abstract void Close();
 
         protected virtual void Dispose(bool disposing)
@@ -41,6 +43,11 @@ namespace Grpc.Net.Client.Balancer
         }
     }
 
+    public abstract class LoadBalancerFactory
+    {
+        public abstract string Name { get; }
+        public abstract LoadBalancer Create(IChannelControlHelper channelControlHelper, ILoggerFactory loggerFactory, IDictionary<string, object> options);
+    }
 }
 
 #pragma warning restore CS1591 // Missing XML comment for publicly visible type or member

@@ -71,14 +71,18 @@ namespace Grpc.Net.Client.Balancer.Internal
         public override Task WriteAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) =>
             _inner.WriteAsync(buffer, offset, count, cancellationToken);
 
+#if !NETSTANDARD2_0
         public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default) =>
             _inner.WriteAsync(buffer, cancellationToken);
+#endif
 
         public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) =>
             _inner.ReadAsync(buffer, offset, count, cancellationToken);
 
+#if !NETSTANDARD2_0
         public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) =>
             _inner.ReadAsync(buffer, cancellationToken);
+#endif
 
         public override Task CopyToAsync(Stream destination, int bufferSize, CancellationToken cancellationToken) =>
             _inner.CopyToAsync(destination, bufferSize, cancellationToken);

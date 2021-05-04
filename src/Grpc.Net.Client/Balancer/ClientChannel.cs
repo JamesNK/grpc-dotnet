@@ -109,7 +109,7 @@ namespace Grpc.Net.Client.Balancer
                 Debug.Assert(removed);
             }
 
-            subChannel.Shutdown();
+            subChannel.Dispose();
         }
 
         public Task ResolveNowAsync(CancellationToken cancellationToken)
@@ -117,9 +117,9 @@ namespace Grpc.Net.Client.Balancer
             return _resolver.RefreshAsync(cancellationToken);
         }
 
-        public void UpdateAddresses(SubChannel subConnection, IReadOnlyList<DnsEndPoint> addresses)
+        public void UpdateAddresses(SubChannel subChannel, IReadOnlyList<DnsEndPoint> addresses)
         {
-            subConnection.UpdateAddresses(addresses);
+            subChannel.UpdateAddresses(addresses);
         }
 
         private void OnResolverError(Exception error)
@@ -129,7 +129,10 @@ namespace Grpc.Net.Client.Balancer
 
         private void OnResolverResult(AddressResolverResult value)
         {
-            _balancer!.UpdateChannelState(new ChannelState(value, GrpcAttributes.Empty));
+            lock (_lock)
+            {
+                _balancer!.UpdateChannelState(new ChannelState(value, GrpcAttributes.Empty));
+            }
         }
 
         public void Dispose()
@@ -138,26 +141,24 @@ namespace Grpc.Net.Client.Balancer
             _balancer?.Dispose();
         }
 
-        internal void OnSubConnectionStateChange(SubChannel subConnection, ConnectivityState state)
+        internal void OnSubChannelStateChange(SubChannel subChannel, ConnectivityState state)
         {
-            Logger.LogInformation("Sub-connection state change: " + subConnection + " " + state);
-            _balancer!.UpdateSubChannelState(subConnection, new SubChannelState { ConnectivityState = state });
+            Logger.LogInformation("Sub-channel state change: " + subChannel + " " + state);
+            _balancer!.UpdateSubChannelState(subChannel, new SubChannelState { ConnectivityState = state });
         }
 
-        public Task ConnectAsync(CancellationToken cancellationToken)
+        public async Task ConnectAsync(CancellationToken cancellationToken)
         {
             if (_resolverSubscription == null)
             {
-                // Default to PickFirstBalancer
                 if (_balancer == null)
                 {
-                    _balancer = new PickFirstBalancer(this, _loggerFactory);
+                    throw new InvalidOperationException($"Load balancer not configured.");
                 }
 
                 _resolverSubscription = _resolver.Subscribe(new ResolverObserver(this));
+                await _resolver.RefreshAsync(cancellationToken).ConfigureAwait(false);
             }
-
-            return Task.CompletedTask;
         }
 
         private class ResolverObserver : IObserver<AddressResolverResult>
@@ -203,7 +204,13 @@ namespace Grpc.Net.Client.Balancer
             }
         }
 
-        public async ValueTask<PickResult> PickAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        public async
+#if !NETSTANDARD2_0
+            ValueTask<PickResult>
+#else
+            Task<PickResult>
+#endif
+            PickAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             var context = new PickContext(request);
             SubChannelPicker? previousPicker = null;
@@ -242,13 +249,23 @@ namespace Grpc.Net.Client.Balancer
             return result;
         }
 
-        private ValueTask<SubChannelPicker> GetPickerAsync(SubChannelPicker? currentPicker, CancellationToken cancellationToken)
+        private
+#if !NETSTANDARD2_0
+            ValueTask<SubChannelPicker>
+#else
+            Task<SubChannelPicker>
+#endif
+            GetPickerAsync(SubChannelPicker? currentPicker, CancellationToken cancellationToken)
         {
             lock (_lock)
             {
                 if (_picker != null && _picker != currentPicker)
                 {
+#if !NETSTANDARD2_0
                     return new ValueTask<SubChannelPicker>(_picker);
+#else
+                    return Task.FromResult<SubChannelPicker>(_picker);
+#endif
                 }
                 else
                 {
@@ -257,7 +274,13 @@ namespace Grpc.Net.Client.Balancer
             }
         }
 
-        private async ValueTask<SubChannelPicker> GetNextPickerAsync(CancellationToken cancellationToken)
+        private async
+#if !NETSTANDARD2_0
+            ValueTask<SubChannelPicker>
+#else
+            Task<SubChannelPicker>
+#endif
+            GetNextPickerAsync(CancellationToken cancellationToken)
         {
             Logger.LogInformation("Waiting for valid picker");
 

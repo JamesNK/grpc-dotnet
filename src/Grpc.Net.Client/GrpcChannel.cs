@@ -24,7 +24,7 @@ using System.Net.Http;
 using Grpc.Core;
 using Grpc.Net.Client.Internal;
 using Grpc.Net.Client.Configuration;
-using GrpcServiceConfig = Grpc.Net.Client.Configuration.ServiceConfig;
+//using GrpcServiceConfig = Grpc.Net.Client.Configuration.ServiceConfig;
 using Grpc.Net.Compression;
 using Grpc.Shared;
 using Microsoft.Extensions.Logging;
@@ -131,22 +131,7 @@ namespace Grpc.Net.Client
             ClientChannel = new ClientChannel(AddressResolver, LoggerFactory, transportFactory);
             ClientChannel.ConfigureBalancer(c =>
             {
-                if (channelOptions.ServiceConfig != null)
-                {
-                    for (var i = 0; i < channelOptions.ServiceConfig.LoadBalancingConfigs.Count; i++)
-                    {
-                        switch (channelOptions.ServiceConfig.LoadBalancingConfigs[0].PolicyName)
-                        {
-                            case LoadBalancingConfig.PickFirstPolicyName:
-                                return new PickFirstBalancer(c, LoggerFactory);
-                            case LoadBalancingConfig.RoundRobinPolicyName:
-                                return new RoundRobinBalancer(c, LoggerFactory, RandomGenerator);
-                        }
-                    }
-                }
-
-                // Default to pick first balancer
-                return new PickFirstBalancer(c, LoggerFactory);
+                return CreateLoadBalancer(channelOptions.ServiceProvider, channelOptions.ServiceConfig, c);
             });
 #endif
 
@@ -207,19 +192,45 @@ namespace Grpc.Net.Client
 #if HAVE_LOAD_BALANCING
         private AddressResolver CreateAddressResolver(IServiceProvider? serviceProvider)
         {
-            var factories = (IEnumerable<AddressResolverFactory>?)serviceProvider?.GetService(typeof(IEnumerable<AddressResolverFactory>));
-            if (factories != null)
+            var factories = (IEnumerable<AddressResolverFactory>?)serviceProvider?.GetService(typeof(IEnumerable<AddressResolverFactory>)) ?? Array.Empty<AddressResolverFactory>();
+            factories = factories.Union(new[] { new DnsAddressResolverFactory(LoggerFactory) });
+
+            foreach (var factory in factories)
             {
-                foreach (var factory in factories)
+                if (string.Equals(factory.Name, Address.Scheme, StringComparison.OrdinalIgnoreCase))
                 {
-                    if (string.Equals(factory.Name, Address.Scheme, StringComparison.OrdinalIgnoreCase))
-                    {
-                        return factory.Create(Address, new AddressResolverOptions());
-                    }
+                    return factory.Create(Address, new AddressResolverOptions());
                 }
             }
 
             throw new InvalidOperationException($"No address resolver configured for the scheme '{Address.Scheme}'.");
+        }
+
+        private LoadBalancer CreateLoadBalancer(IServiceProvider? serviceProvider, ServiceConfig? serviceConfig, IChannelControlHelper channelControlHelper)
+        {
+            if (serviceConfig != null && serviceConfig.LoadBalancingConfigs.Count > 0)
+            {
+                var factories = (IEnumerable<LoadBalancerFactory>?)serviceProvider?.GetService(typeof(IEnumerable<LoadBalancerFactory>)) ?? Array.Empty<LoadBalancerFactory>();
+                factories = factories.Union(new[] { new RoundRobinBalancerFactory() });
+
+                for (var i = 0; i < serviceConfig.LoadBalancingConfigs.Count; i++)
+                {
+                    var loadBalancingConfig = serviceConfig.LoadBalancingConfigs[i];
+                    var policyName = loadBalancingConfig.PolicyName;
+
+                    foreach (var factory in factories)
+                    {
+                        if (string.Equals(factory.Name, policyName, StringComparison.OrdinalIgnoreCase))
+                        {
+                            return factory.Create(channelControlHelper, LoggerFactory, (IDictionary<string, object>)loadBalancingConfig.Inner[policyName]);
+                        }
+                    }
+                }
+
+                throw new InvalidOperationException($"No load balancers configured for {string.Join(", ", serviceConfig.LoadBalancingConfigs.Select(c => $"'{c.PolicyName}'"))}.");
+            }
+
+            return new PickFirstBalancer(channelControlHelper, LoggerFactory);
         }
 #endif
 
@@ -242,7 +253,7 @@ namespace Grpc.Net.Client
             }
         }
 
-        private static Dictionary<MethodKey, MethodConfig> CreateServiceConfigMethods(GrpcServiceConfig serviceConfig)
+        private static Dictionary<MethodKey, MethodConfig> CreateServiceConfigMethods(ServiceConfig serviceConfig)
         {
             var configs = new Dictionary<MethodKey, MethodConfig>();
             for (var i = 0; i < serviceConfig.MethodConfigs.Count; i++)

@@ -34,7 +34,7 @@ using Microsoft.Extensions.Logging;
 
 namespace Grpc.Net.Client.Balancer
 {
-    public class SubChannel
+    public class SubChannel : IDisposable
     {
         internal readonly List<DnsEndPoint> _addresses;
         internal ILogger Logger => _channel.Logger;
@@ -150,7 +150,7 @@ namespace Grpc.Net.Client.Balancer
                 return;
             }
             _state = state;
-            _channel.OnSubConnectionStateChange(this, _state);
+            _channel.OnSubChannelStateChange(this, _state);
         }
 
         public override string ToString()
@@ -163,8 +163,9 @@ namespace Grpc.Net.Client.Balancer
             return _addresses.ToArray();
         }
 
-        public void Shutdown()
+        public void Dispose()
         {
+            UpdateConnectivityState(ConnectivityState.Shutdown);
             Transport.Dispose();
         }
     }

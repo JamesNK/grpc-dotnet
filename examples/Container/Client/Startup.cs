@@ -1,9 +1,11 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Net.Http;
 using Grpc.Core;
 using Grpc.Net.Client;
 using Grpc.Net.Client.Balancer;
+using Grpc.Net.Client.Configuration;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Hosting;
@@ -14,6 +16,70 @@ using Microsoft.Extensions.Logging;
 
 namespace Client
 {
+    public class ReportingLoadBalancer : LoadBalancer, ISubChannelReporter
+    {
+        private readonly LoadBalancer _innerLoadBalancer;
+
+        public List<SubChannel> SubChannels { get; private set; }
+
+        public ReportingLoadBalancer(LoadBalancer innerLoadBalancer)
+        {
+            _innerLoadBalancer = innerLoadBalancer;
+            SubChannels = new List<SubChannel>();
+        }
+
+        public override void Close()
+        {
+            _innerLoadBalancer.Close();
+        }
+
+        public override void ResolverError(Exception exception)
+        {
+            _innerLoadBalancer.ResolverError(exception);
+        }
+
+        public override void UpdateChannelState(ChannelState state)
+        {
+            _innerLoadBalancer.UpdateChannelState(state);
+        }
+
+        public override void UpdateSubChannelState(SubChannel subChannel, SubChannelState state)
+        {
+            if (!SubChannels.Contains(subChannel))
+            {
+                SubChannels.Add(subChannel);
+            }
+
+            _innerLoadBalancer.UpdateSubChannelState(subChannel, state);
+        }
+    }
+
+    public class ReportingLoadBalancerFactory : LoadBalancerFactory, ISubChannelReporter
+    {
+        private readonly LoadBalancerFactory _loadBalancerFactory;
+        public ISubChannelReporter Reporter { get; private set; } = default!;
+
+        public override string Name { get; } = "reporter";
+        public List<SubChannel> SubChannels => Reporter?.SubChannels ?? new List<SubChannel>();
+
+        public ReportingLoadBalancerFactory(LoadBalancerFactory loadBalancerFactory)
+        {
+            _loadBalancerFactory = loadBalancerFactory;
+        }
+
+        public override LoadBalancer Create(IChannelControlHelper channelControlHelper, ILoggerFactory loggerFactory, IDictionary<string, object> options)
+        {
+            var loadBalancer = new ReportingLoadBalancer(_loadBalancerFactory.Create(channelControlHelper, loggerFactory, options));
+            Reporter = loadBalancer;
+            return loadBalancer;
+        }
+    }
+
+    public interface ISubChannelReporter
+    {
+        List<SubChannel> SubChannels { get; }
+    }
+
     public class Startup
     {
         public Startup(IConfiguration configuration)
@@ -30,6 +96,14 @@ namespace Client
             services.AddRazorPages();
             services.AddServerSideBlazor();
 
+            //var reportingLoadBalancer = new ReportingLoadBalancer(new RoundRobinBalancer();
+
+            ReportingLoadBalancerFactory f = new ReportingLoadBalancerFactory(new RoundRobinBalancerFactory());
+
+            services.AddSingleton<LoadBalancerFactory>(f);
+            services.AddSingleton<ISubChannelReporter>(f);
+
+            /*
             services.AddSingleton(services =>
             {
                 // Get the service address from appsettings.json
@@ -49,17 +123,29 @@ namespace Client
 
                 return grpcConnection;
             });
+            */
 
             services.AddSingleton(services =>
             {
-                var grpcConnection = services.GetRequiredService<ClientChannel>();
-                var loggerFactory = services.GetRequiredService<ILoggerFactory>();
+                //var grpcConnection = services.GetRequiredService<ClientChannel>();
+                //var loggerFactory = services.GetRequiredService<ILoggerFactory>();
 
-                var channel = GrpcChannel.ForAddress("http://localhost", new GrpcChannelOptions
+                // Get the service address from appsettings.json
+                var config = services.GetRequiredService<IConfiguration>();
+                var backendUrl = config["BackendUrl"];
+
+                // If no address is set then fallback to the current webpage URL
+                if (string.IsNullOrEmpty(backendUrl))
+                {
+                    var navigationManager = services.GetRequiredService<NavigationManager>();
+                    backendUrl = navigationManager.BaseUri;
+                }
+
+                var channel = GrpcChannel.ForAddress(backendUrl, new GrpcChannelOptions
                 {
                     Credentials = ChannelCredentials.Insecure,
-                    LoggerFactory = loggerFactory,
-                    HttpHandler = new BalancerHttpHandler(new SocketsHttpHandler(), grpcConnection)
+                    ServiceProvider = services,
+                    ServiceConfig = new ServiceConfig { LoadBalancingConfigs = { new LoadBalancingConfig("reporter") } }
                 });
 
                 return channel;
