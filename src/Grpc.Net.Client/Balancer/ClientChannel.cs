@@ -210,9 +210,8 @@ namespace Grpc.Net.Client.Balancer
 #else
             Task<PickResult>
 #endif
-            PickAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+            PickAsync(PickContext context, CancellationToken cancellationToken)
         {
-            var context = new PickContext(request);
             SubChannelPicker? previousPicker = null;
 
             PickResult result;
@@ -224,27 +223,40 @@ namespace Grpc.Net.Client.Balancer
             {
                 var currentPicker = await GetPickerAsync(previousPicker, cancellationToken).ConfigureAwait(false);
 
-                result = currentPicker.Pick(context);
+                try
+                {
+                    result = currentPicker.Pick(context);
 
-                if (result.SubChannel != null)
-                {
-                    break;
+                    if (result.SubChannel != null)
+                    {
+                        break;
+                    }
+                    else
+                    {
+                        Logger.LogInformation("Current picker doesn't have a ready sub-channel");
+                        previousPicker = currentPicker;
+                    }
                 }
-                else
+                catch (OperationCanceledException)
                 {
-                    Logger.LogInformation("Current picker doesn't have a ready sub-channel");
-                    previousPicker = currentPicker;
+                    // Always throw on cancellation. Could be from call deadline or client dispose.
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    if (context.WaitForReady)
+                    {
+                        Logger.LogInformation(ex, "Error picking. Retry because of wait for ready.");
+                        previousPicker = currentPicker;
+                    }
+                    else
+                    {
+                        throw;
+                    }
                 }
             }
 
-            Logger.LogInformation("Successfully picked sub-channel: " + result.SubChannel);
-
-            if (result.SubChannel.CurrentEndPoint == null)
-            {
-                // For some reason the returned sub-channel doesn't have a current endpoint.
-                // Connect the sub-channel to get 
-                await result.SubChannel.ConnectAsync(cancellationToken).ConfigureAwait(false);
-            }
+            Logger.LogInformation("Successfully picked sub-channel: " + result.SubChannel + " with endpoint " + result.EndPoint);
 
             return result;
         }
@@ -291,14 +303,17 @@ namespace Grpc.Net.Client.Balancer
             await _nextPickerLock.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
-                var nextPicker = await nextPickerTcs.Task.ConfigureAwait(false);
-
-                lock (_lock)
+                using (cancellationToken.Register(s => ((TaskCompletionSource<SubChannelPicker?>)s!).TrySetCanceled(), nextPickerTcs))
                 {
-                    _nextPickerTcs = new TaskCompletionSource<SubChannelPicker>(TaskCreationOptions.RunContinuationsAsynchronously);
-                }
+                    var nextPicker = await nextPickerTcs.Task.ConfigureAwait(false);
 
-                return nextPicker;
+                    lock (_lock)
+                    {
+                        _nextPickerTcs = new TaskCompletionSource<SubChannelPicker>(TaskCreationOptions.RunContinuationsAsynchronously);
+                    }
+
+                    return nextPicker;
+                }
             }
             finally
             {

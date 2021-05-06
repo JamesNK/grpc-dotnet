@@ -838,6 +838,13 @@ namespace Grpc.Net.Client.Internal
                 headers.TryAddWithoutValidation(GrpcProtocolConstants.TimeoutHeader, GrpcProtocolHelpers.EncodeTimeout(timeout.Value.Ticks / TimeSpan.TicksPerMillisecond));
             }
 
+            if (Options.IsWaitForReady)
+            {
+#pragma warning disable CS0618 // Type or member is obsolete
+                message.Properties["WaitForReady"] = true;
+#pragma warning restore CS0618 // Type or member is obsolete
+            }
+
             return message;
         }
 

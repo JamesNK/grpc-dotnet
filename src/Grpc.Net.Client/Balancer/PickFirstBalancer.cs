@@ -20,8 +20,11 @@
 #pragma warning disable CS1591 // Missing XML comment for publicly visible type or member
 
 using System;
+using System.Collections.Generic;
+using System.Net;
 using System.Threading;
 using Grpc.Net.Client.Balancer.Internal;
+using Grpc.Net.Client.Configuration;
 using Microsoft.Extensions.Logging;
 
 namespace Grpc.Net.Client.Balancer
@@ -59,6 +62,7 @@ namespace Grpc.Net.Client.Balancer
             if (state.ResolverState.Addresses.Count == 0)
             {
                 ResolverError(new InvalidOperationException("Resolver returned no addresses."));
+                return;
             }
 
             if (_subChannel == null)
@@ -73,7 +77,7 @@ namespace Grpc.Net.Client.Balancer
                     throw;
                 }
 
-                _channel.UpdateState(new BalancerState(ConnectivityState.Idle, new PickFirstPicker(_subChannel)));
+                _channel.UpdateState(new BalancerState(ConnectivityState.Idle, EmptyPicker.Instance));
             }
             else
             {
@@ -85,25 +89,28 @@ namespace Grpc.Net.Client.Balancer
 
         public override void UpdateSubChannelState(SubChannel subChannel, SubChannelState state)
         {
-            _logger.LogInformation("Updating sub-channel state.");
+            _logger.LogTrace("Updating sub-channel state.");
 
             if (_subChannel != subChannel)
             {
-                _logger.LogInformation("Ignored state change because of unknown sub-channel.");
+                _logger.LogTrace("Ignored state change because of unknown sub-channel.");
                 return;
             }
 
-            switch (_channel.State)
+            switch (state.ConnectivityState)
             {
                 case ConnectivityState.Ready:
+                    _channel.UpdateState(new BalancerState(state.ConnectivityState, new PickFirstPicker(_subChannel, _subChannel.CurrentEndPoint!)));
+                    break;
                 case ConnectivityState.Idle:
-                    _channel.UpdateState(new BalancerState(_channel.State, new PickFirstPicker(_subChannel)));
+                    _channel.UpdateState(new BalancerState(state.ConnectivityState, EmptyPicker.Instance));
+                    _ = _subChannel.ConnectAsync(CancellationToken.None);
                     break;
                 case ConnectivityState.Connecting:
-                    _channel.UpdateState(new BalancerState(ConnectivityState.Connecting, EmptyPicker.Instance));
+                    _channel.UpdateState(new BalancerState(state.ConnectivityState, EmptyPicker.Instance));
                     break;
                 case ConnectivityState.TransientFailure:
-                    _channel.UpdateState(new BalancerState(ConnectivityState.TransientFailure, new FailurePicker(state.ConnectionError!)));
+                    _channel.UpdateState(new BalancerState(state.ConnectivityState, new FailurePicker(state.ConnectionError!)));
                     break;
                 case ConnectivityState.Shutdown:
                     _subChannel = null;
@@ -113,17 +120,29 @@ namespace Grpc.Net.Client.Balancer
 
         private class PickFirstPicker : SubChannelPicker
         {
-            private readonly SubChannel _subConnection;
+            private readonly SubChannel _subChannel;
+            private readonly DnsEndPoint _endPoint;
 
-            public PickFirstPicker(SubChannel subConnection)
+            public PickFirstPicker(SubChannel subChannel, DnsEndPoint endPoint)
             {
-                _subConnection = subConnection;
+                _subChannel = subChannel;
+                _endPoint = endPoint;
             }
 
             public override PickResult Pick(PickContext context)
             {
-                return new PickResult(_subConnection, c => { });
+                return new PickResult(_subChannel, _endPoint, c => { });
             }
+        }
+    }
+
+    public class PickFirstBalancerFactory : LoadBalancerFactory
+    {
+        public override string Name { get; } = LoadBalancingConfig.PickFirstPolicyName;
+
+        public override LoadBalancer Create(IChannelControlHelper channelControlHelper, ILoggerFactory loggerFactory, IDictionary<string, object> options)
+        {
+            return new PickFirstBalancer(channelControlHelper, loggerFactory);
         }
     }
 

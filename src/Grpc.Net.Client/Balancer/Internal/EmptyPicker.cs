@@ -23,7 +23,7 @@ using System;
 
 namespace Grpc.Net.Client.Balancer.Internal
 {
-    public class EmptyPicker : SubChannelPicker
+    public sealed class EmptyPicker : SubChannelPicker
     {
         public static readonly EmptyPicker Instance = new EmptyPicker();
 
@@ -31,7 +31,7 @@ namespace Grpc.Net.Client.Balancer.Internal
 
         private EmptyPicker()
         {
-            _pickResult = new PickResult(null, null);
+            _pickResult = new PickResult(null, null, null);
         }
 
         public override PickResult Pick(PickContext context)

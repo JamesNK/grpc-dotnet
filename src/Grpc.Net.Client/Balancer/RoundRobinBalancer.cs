@@ -268,8 +268,9 @@ namespace Grpc.Net.Client.Balancer
         {
             var c = Interlocked.Increment(ref _pickCount);
             var index = (c - 1) % _subChannels.Count;
+            var item = _subChannels[(int)index];
 
-            return new PickResult(_subChannels[(int)index].SubChannel, c => { });
+            return new PickResult(item.SubChannel, item.Address, c => { });
         }
 
         public override string ToString()

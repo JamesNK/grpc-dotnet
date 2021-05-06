@@ -43,170 +43,119 @@ using Grpc.Net.Client.Balancer;
 namespace Grpc.Net.Client.Tests.Balancer
 {
     [TestFixture]
-    public class AddressResolverTests
+    public class WaitForReadyTests
     {
         [Test]
-        public async Task AddressResolver_ResolveNameFromServices_Success()
+        public async Task AddressResolverReturnsNoAddresses_CallWithWaitForReady_Wait()
         {
             // Arrange
+            string? authority = null;
+            var testMessageHandler = TestHttpMessageHandler.Create(async request =>
+            {
+                authority = request.RequestUri!.Authority;
+                var reply = new HelloReply { Message = "Hello world" };
+
+                var streamContent = await ClientTestHelpers.CreateResponseContent(reply).DefaultTimeout();
+
+                return ResponseUtils.CreateResponse(HttpStatusCode.OK, streamContent);
+            });
+
             var services = new ServiceCollection();
 
             var addressResolver = new TestAddressResolver();
-            addressResolver.UpdateEndPoints(new List<DnsEndPoint>
-            {
-                new DnsEndPoint("localhost", 80)
-            });
 
             services.AddSingleton<AddressResolverFactory>(new TestAddressResolverFactory(addressResolver));
             services.AddSingleton<ISubChannelTransportFactory>(new TestSubChannelTransportFactory());
 
-            var channelOptions = new GrpcChannelOptions
+            var invoker = HttpClientCallInvokerFactory.Create(testMessageHandler, "test://localhost", configure: o =>
             {
-                Credentials = ChannelCredentials.Insecure,
-                ServiceProvider = services.BuildServiceProvider()
-            };
-
-            // Act
-            var channel = GrpcChannel.ForAddress("test://localhost", channelOptions);
-            await channel.ConnectAsync();
-
-            // Assert
-            var subChannels = channel.ClientChannel.GetSubChannels();
-            Assert.AreEqual(1, subChannels.Count);
-        }
-
-        [Test]
-        public async Task ChangeAddresses_PickFirst_SubChannelAddressesUpdated()
-        {
-            // Arrange
-            var services = new ServiceCollection();
-
-            var addressResolver = new TestAddressResolver();
-            addressResolver.UpdateEndPoints(new List<DnsEndPoint>
-            {
-                new DnsEndPoint("localhost", 80)
+                o.Credentials = ChannelCredentials.Insecure;
+                o.ServiceProvider = services.BuildServiceProvider();
             });
 
-            services.AddSingleton<AddressResolverFactory>(new TestAddressResolverFactory(addressResolver));
-            services.AddSingleton<ISubChannelTransportFactory>(new TestSubChannelTransportFactory());
-
-            var channelOptions = new GrpcChannelOptions
-            {
-                Credentials = ChannelCredentials.Insecure,
-                ServiceProvider = services.BuildServiceProvider()
-            };
-
             // Act
-            var channel = GrpcChannel.ForAddress("test://localhost", channelOptions);
-            await channel.ConnectAsync();
+            var call = invoker.AsyncUnaryCall<HelloRequest, HelloReply>(ClientTestHelpers.ServiceMethod, string.Empty, new CallOptions().WithWaitForReady(), new HelloRequest());
 
-            // Assert
-            var subChannels = channel.ClientChannel.GetSubChannels();
-            Assert.AreEqual(1, subChannels.Count);
+            var responseTask = call.ResponseAsync;
 
-            Assert.AreEqual(1, subChannels[0]._addresses.Count);
-            Assert.AreEqual(new DnsEndPoint("localhost", 80), subChannels[0]._addresses[0]);
-            Assert.AreEqual(ConnectivityState.Ready, subChannels[0].State);
+            Assert.IsFalse(responseTask.IsCompleted);
+            Assert.IsNull(authority);
 
             addressResolver.UpdateEndPoints(new List<DnsEndPoint>
             {
                 new DnsEndPoint("localhost", 81)
             });
 
-            var newSubChannels = channel.ClientChannel.GetSubChannels();
-            CollectionAssert.AreEqual(subChannels, newSubChannels);
-
-            Assert.AreEqual(1, subChannels[0]._addresses.Count);
-            Assert.AreEqual(new DnsEndPoint("localhost", 81), subChannels[0]._addresses[0]);
-            Assert.AreEqual(ConnectivityState.Ready, subChannels[0].State);
+            await responseTask.DefaultTimeout();
+            Assert.AreEqual("localhost:81", authority);
         }
 
         [Test]
-        public async Task ChangeAddresses_RoundRobin_OldSubChannelDisconnected()
+        public async Task AddressResolverReturnsNoAddresses_DeadlineWhileWaitForReady_Error()
         {
             // Arrange
-            var services = new ServiceCollection();
+            var testMessageHandler = TestHttpMessageHandler.Create(async request =>
+            {
+                var reply = new HelloReply { Message = "Hello world" };
+                var streamContent = await ClientTestHelpers.CreateResponseContent(reply).DefaultTimeout();
+                return ResponseUtils.CreateResponse(HttpStatusCode.OK, streamContent);
+            });
 
+            var services = new ServiceCollection();
             var addressResolver = new TestAddressResolver();
-            addressResolver.UpdateEndPoints(new List<DnsEndPoint>
-            {
-                new DnsEndPoint("localhost", 80)
-            });
-
             services.AddSingleton<AddressResolverFactory>(new TestAddressResolverFactory(addressResolver));
             services.AddSingleton<ISubChannelTransportFactory>(new TestSubChannelTransportFactory());
 
-            var channelOptions = new GrpcChannelOptions
+            var invoker = HttpClientCallInvokerFactory.Create(testMessageHandler, "test://localhost", configure: o =>
             {
-                Credentials = ChannelCredentials.Insecure,
-                ServiceConfig = new ServiceConfig { LoadBalancingConfigs = { new RoundRobinConfig() } },
-                ServiceProvider = services.BuildServiceProvider()
-            };
+                o.Credentials = ChannelCredentials.Insecure;
+                o.ServiceProvider = services.BuildServiceProvider();
+            });
 
             // Act
-            var channel = GrpcChannel.ForAddress("test://localhost", channelOptions);
-            await channel.ConnectAsync();
+            var callOptions = new CallOptions(deadline: DateTime.UtcNow.AddSeconds(0.2)).WithWaitForReady();
+            var call = invoker.AsyncUnaryCall<HelloRequest, HelloReply>(ClientTestHelpers.ServiceMethod, string.Empty, callOptions, new HelloRequest());
 
-            // Assert
-            var subChannels = channel.ClientChannel.GetSubChannels();
-            Assert.AreEqual(1, subChannels.Count);
+            var ex = await ExceptionAssert.ThrowsAsync<RpcException>(() => call.ResponseAsync).DefaultTimeout();
 
-            Assert.AreEqual(1, subChannels[0]._addresses.Count);
-            Assert.AreEqual(new DnsEndPoint("localhost", 80), subChannels[0]._addresses[0]);
-            Assert.AreEqual(ConnectivityState.Ready, subChannels[0].State);
-
-            addressResolver.UpdateEndPoints(new List<DnsEndPoint>
-            {
-                new DnsEndPoint("localhost", 81)
-            });
-            Assert.AreEqual(ConnectivityState.Shutdown, subChannels[0].State);
-
-            var newSubChannels = channel.ClientChannel.GetSubChannels();
-            CollectionAssert.AreNotEqual(subChannels, newSubChannels);
-            Assert.AreEqual(1, newSubChannels.Count);
-
-            Assert.AreEqual(1, newSubChannels[0]._addresses.Count);
-            Assert.AreEqual(new DnsEndPoint("localhost", 81), newSubChannels[0]._addresses[0]);
-
-            await channel.ClientChannel.PickAsync(new PickContext(new HttpRequestMessage(), waitForReady: false), CancellationToken.None).AsTask().DefaultTimeout();
-            Assert.AreEqual(ConnectivityState.Ready, newSubChannels[0].State);
+            Assert.AreEqual(StatusCode.DeadlineExceeded, ex.StatusCode);
+            Assert.AreEqual(string.Empty, ex.Status.Detail);
         }
 
         [Test]
-        public async Task AddressResolver_WaitForRefreshAsync_Success()
+        public async Task AddressResolverReturnsNoAddresses_DisposeWhileWaitForReady_Error()
         {
             // Arrange
-            var services = new ServiceCollection();
-            var tcs = new TaskCompletionSource<object?>(TaskCreationOptions.RunContinuationsAsynchronously);
-
-            var addressResolver = new TestAddressResolver(tcs.Task);
-            addressResolver.UpdateEndPoints(new List<DnsEndPoint>
+            var testMessageHandler = TestHttpMessageHandler.Create(async request =>
             {
-                new DnsEndPoint("localhost", 80)
+                var reply = new HelloReply { Message = "Hello world" };
+                var streamContent = await ClientTestHelpers.CreateResponseContent(reply).DefaultTimeout();
+                return ResponseUtils.CreateResponse(HttpStatusCode.OK, streamContent);
             });
 
+            var services = new ServiceCollection();
+            var addressResolver = new TestAddressResolver();
             services.AddSingleton<AddressResolverFactory>(new TestAddressResolverFactory(addressResolver));
             services.AddSingleton<ISubChannelTransportFactory>(new TestSubChannelTransportFactory());
 
-            var channelOptions = new GrpcChannelOptions
+            var invoker = HttpClientCallInvokerFactory.Create(testMessageHandler, "test://localhost", configure: o =>
             {
-                Credentials = ChannelCredentials.Insecure,
-                ServiceProvider = services.BuildServiceProvider()
-            };
+                o.Credentials = ChannelCredentials.Insecure;
+                o.ServiceProvider = services.BuildServiceProvider();
+            });
 
             // Act
-            var channel = GrpcChannel.ForAddress("test://localhost", channelOptions);
-            var connectTask = channel.ConnectAsync();
+            var callOptions = new CallOptions().WithWaitForReady();
+            var call = invoker.AsyncUnaryCall<HelloRequest, HelloReply>(ClientTestHelpers.ServiceMethod, string.Empty, callOptions, new HelloRequest());
 
-            // Assert
-            Assert.IsFalse(connectTask.IsCompleted);
+            var exTask = ExceptionAssert.ThrowsAsync<RpcException>(() => call.ResponseAsync);
 
-            tcs.SetResult(null);
+            call.Dispose();
 
-            await connectTask.DefaultTimeout();
+            var ex = await exTask.DefaultTimeout();
 
-            var subChannels = channel.ClientChannel.GetSubChannels();
-            Assert.AreEqual(1, subChannels.Count);
+            Assert.AreEqual(StatusCode.Cancelled, ex.StatusCode);
+            Assert.AreEqual("gRPC call disposed.", ex.Status.Detail);
         }
 
         private class TestAddressResolverFactory : AddressResolverFactory
@@ -277,7 +226,7 @@ namespace Grpc.Net.Client.Tests.Balancer
         {
             private readonly SubChannel _subChannel;
 
-            public DnsEndPoint? CurrentEndPoint { get; }
+            public DnsEndPoint? CurrentEndPoint { get; private set; }
 
             public TestSubChannelTransport(SubChannel subChannel)
             {
@@ -303,6 +252,7 @@ namespace Grpc.Net.Client.Tests.Balancer
 
             public ValueTask<bool> TryConnectAsync(CancellationToken cancellationToken)
             {
+                CurrentEndPoint = _subChannel._addresses[0];
                 _subChannel.UpdateConnectivityState(ConnectivityState.Ready);
                 return new ValueTask<bool>(true);
             }

@@ -27,11 +27,13 @@ namespace Grpc.Net.Client.Balancer
     public class PickContext
     {
         public HttpRequestMessage Request { get; }
+        public bool WaitForReady { get; }
 
         [DebuggerStepThrough]
-        public PickContext(HttpRequestMessage request)
+        public PickContext(HttpRequestMessage request, bool waitForReady)
         {
             Request = request;
+            WaitForReady = waitForReady;
         }
     }
 

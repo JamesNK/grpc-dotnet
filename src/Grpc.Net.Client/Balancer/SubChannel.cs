@@ -108,7 +108,7 @@ namespace Grpc.Net.Client.Balancer
             await ResetTransportAsync(cancellationToken).ConfigureAwait(false);
         }
 
-        public async Task ResetTransportAsync(CancellationToken cancellationToken)
+        private async Task ResetTransportAsync(CancellationToken cancellationToken)
         {
             for (var attempt = 0; ; attempt++)
             {
@@ -121,8 +121,6 @@ namespace Grpc.Net.Client.Balancer
                 {
                     return;
                 }
-
-                UpdateConnectivityState(ConnectivityState.Connecting);
 
                 if (await Transport.TryConnectAsync(cancellationToken).ConfigureAwait(false))
                 {

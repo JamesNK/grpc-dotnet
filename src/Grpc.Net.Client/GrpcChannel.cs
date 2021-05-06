@@ -211,7 +211,7 @@ namespace Grpc.Net.Client
             if (serviceConfig != null && serviceConfig.LoadBalancingConfigs.Count > 0)
             {
                 var factories = (IEnumerable<LoadBalancerFactory>?)serviceProvider?.GetService(typeof(IEnumerable<LoadBalancerFactory>)) ?? Array.Empty<LoadBalancerFactory>();
-                factories = factories.Union(new[] { new RoundRobinBalancerFactory() });
+                factories = factories.Union(new LoadBalancerFactory[] { new PickFirstBalancerFactory(), new RoundRobinBalancerFactory() });
 
                 for (var i = 0; i < serviceConfig.LoadBalancingConfigs.Count; i++)
                 {

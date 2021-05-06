@@ -146,6 +146,8 @@ namespace Grpc.Net.Client.Tests.Balancer
 
             grpcWebHandler.HttpVersion = new Version(1, 1);
 
+            await Task.Delay(1000);
+
             var ex = await ExceptionAssert.ThrowsAsync<RpcException>(() => client.UnaryCall(new HelloRequest { Name = "Balancer" }).ResponseAsync).DefaultTimeout();
             Assert.AreEqual(StatusCode.Unavailable, ex.StatusCode);
 

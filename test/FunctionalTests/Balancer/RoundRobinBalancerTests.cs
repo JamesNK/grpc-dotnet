@@ -117,7 +117,7 @@ namespace Grpc.Net.Client.Tests.Balancer
             await TestHelpers.AssertIsTrueRetryAsync(() =>
             {
                 var picker = channel.ClientChannel._picker as RoundRobinPicker;
-                return picker?._subChannels.Count == 2;
+                return picker?._subChannels.Count(s => s.SubChannel.State == ConnectivityState.Ready) == 2;
             }, "Wait for all subconnections to be connected.").DefaultTimeout();
 
             var client = TestClientFactory.Create(channel, endpoint1.Method);

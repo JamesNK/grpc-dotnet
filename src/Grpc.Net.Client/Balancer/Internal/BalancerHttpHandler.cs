@@ -51,31 +51,40 @@ namespace Grpc.Net.Client.Balancer.Internal
 #if NET5_0_OR_GREATER
         private async ValueTask<Stream> OnConnect(SocketsHttpConnectionContext context, CancellationToken cancellationToken)
         {
-            if (!context.InitialRequestMessage.Options.TryGetValue(_requestOptionsSubConnectionKey, out var subConnection))
+            if (!context.InitialRequestMessage.Options.TryGetValue(_requestOptionsSubConnectionKey, out var subChannel))
             {
                 throw new InvalidOperationException();
             }
 
-            return await subConnection.Transport.GetStreamAsync(context.DnsEndPoint, cancellationToken).ConfigureAwait(false);
+            return await subChannel.Transport.GetStreamAsync(context.DnsEndPoint, cancellationToken).ConfigureAwait(false);
         }
 #endif
 
         protected override async Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request, CancellationToken cancellationToken)
         {
+            var waitForReady = false;
+#pragma warning disable CS0618 // Type or member is obsolete
+            if (request.Properties.TryGetValue("WaitForReady", out var value) && value is bool)
+#pragma warning restore CS0618 // Type or member is obsolete
+            {
+                waitForReady = (bool)value;
+            }
+
             await _clientConnection.ConnectAsync(cancellationToken).ConfigureAwait(false);
-            var result = await _clientConnection.PickAsync(request, cancellationToken).ConfigureAwait(false);
+            var pickContext = new PickContext(request, waitForReady);
+            var result = await _clientConnection.PickAsync(pickContext, cancellationToken).ConfigureAwait(false);
 
             // Update request host.
             var uriBuilder = new UriBuilder(request.RequestUri!);
-            uriBuilder.Host = result.SubChannel!.CurrentEndPoint!.Host;
-            uriBuilder.Port = result.SubChannel!.CurrentEndPoint!.Port;
+            uriBuilder.Host = result.EndPoint!.Host;
+            uriBuilder.Port = result.EndPoint!.Port;
             request.RequestUri = uriBuilder.Uri;
 
 #if NET5_0_OR_GREATER
             // Set sub-connection onto request.
             // Will be used to get a stream in SocketsHttpHandler.ConnectCallback.
-            request.Options.Set(_requestOptionsSubConnectionKey, result.SubChannel);
+            request.Options.Set(_requestOptionsSubConnectionKey, result.SubChannel!);
 #endif
 
             try

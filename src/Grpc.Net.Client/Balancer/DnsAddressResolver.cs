@@ -100,7 +100,7 @@ namespace Grpc.Net.Client.Balancer
                 if (_subscriptions.Count == 0)
                 {
                     _timer = new Timer(OnTimerCallback, null, Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
-                    _timer.Change(TimeSpan.Zero, TimeSpan.FromSeconds(10));
+                    _timer.Change(TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(10));
                 }
                 _subscriptions.Add(observer);
             }

@@ -21,6 +21,7 @@
 
 using System;
 using System.Diagnostics;
+using System.Net;
 
 namespace Grpc.Net.Client.Balancer
 {
@@ -29,13 +30,15 @@ namespace Grpc.Net.Client.Balancer
         private readonly Action<CompleteContext>? _onComplete;
 
         [DebuggerStepThrough]
-        public PickResult(SubChannel? subChannel, Action<CompleteContext>? onComplete)
+        public PickResult(SubChannel? subChannel, DnsEndPoint? endPoint, Action<CompleteContext>? onComplete)
         {
             SubChannel = subChannel;
+            EndPoint = endPoint;
             _onComplete = onComplete;
         }
 
         public SubChannel? SubChannel { get; }
+        public DnsEndPoint? EndPoint { get; }
 
         public void Complete(CompleteContext context)
         {

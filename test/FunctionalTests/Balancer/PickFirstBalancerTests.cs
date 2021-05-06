@@ -77,12 +77,12 @@ namespace Grpc.Net.Client.Tests.Balancer
             // Arrange
             using var endpoint = BalancerHelpers.CreateGrpcEndpoint<HelloRequest, HelloReply>(50250, UnaryMethod, nameof(UnaryMethod));
 
-            var channel = await BalancerHelpers.CreateChannel(LoggerFactory, new PickFirstConfig(), new[] { endpoint.Address });
+            var channel = await BalancerHelpers.CreateChannel(LoggerFactory, new PickFirstConfig(), new[] { endpoint.Address }).DefaultTimeout();
 
             var client = TestClientFactory.Create(channel, endpoint.Method);
 
             // Act
-            var reply = await client.UnaryCall(new HelloRequest { Name = "Balancer" });
+            var reply = await client.UnaryCall(new HelloRequest { Name = "Balancer" }).ResponseAsync.DefaultTimeout();
 
             // Assert
             Assert.AreEqual("Balancer", reply.Message);
@@ -92,7 +92,7 @@ namespace Grpc.Net.Client.Tests.Balancer
 
             using var endpointNew = BalancerHelpers.CreateGrpcEndpoint<HelloRequest, HelloReply>(50250, UnaryMethod, nameof(UnaryMethod));
 
-            reply = await client.UnaryCall(new HelloRequest { Name = "Balancer" });
+            reply = await client.UnaryCall(new HelloRequest { Name = "Balancer" }).ResponseAsync.DefaultTimeout();
 
             Assert.AreEqual("Balancer", reply.Message);
             Assert.AreEqual("127.0.0.1:50250", host);
@@ -118,12 +118,12 @@ namespace Grpc.Net.Client.Tests.Balancer
             using var endpoint1 = BalancerHelpers.CreateGrpcEndpoint<HelloRequest, HelloReply>(50250, UnaryMethod, nameof(UnaryMethod));
             using var endpoint2 = BalancerHelpers.CreateGrpcEndpoint<HelloRequest, HelloReply>(50251, UnaryMethod, nameof(UnaryMethod));
 
-            var channel = await BalancerHelpers.CreateChannel(LoggerFactory, new PickFirstConfig(), new[] { endpoint1.Address, endpoint2.Address });
+            var channel = await BalancerHelpers.CreateChannel(LoggerFactory, new PickFirstConfig(), new[] { endpoint1.Address, endpoint2.Address }).DefaultTimeout();
 
             var client = TestClientFactory.Create(channel, endpoint1.Method);
 
             // Act
-            var reply = await client.UnaryCall(new HelloRequest { Name = "Balancer" });
+            var reply = await client.UnaryCall(new HelloRequest { Name = "Balancer" }).ResponseAsync.DefaultTimeout();
 
             // Assert
             Assert.AreEqual("Balancer", reply.Message);
@@ -131,7 +131,7 @@ namespace Grpc.Net.Client.Tests.Balancer
 
             endpoint1.Dispose();
 
-            reply = await client.UnaryCall(new HelloRequest { Name = "Balancer" });
+            reply = await client.UnaryCall(new HelloRequest { Name = "Balancer" }).ResponseAsync.DefaultTimeout();
             Assert.AreEqual("Balancer", reply.Message);
             Assert.AreEqual("127.0.0.1:50251", host);
         }
@@ -158,7 +158,7 @@ namespace Grpc.Net.Client.Tests.Balancer
             using var endpoint1 = BalancerHelpers.CreateGrpcEndpoint<HelloRequest, HelloReply>(50250, UnaryMethod, nameof(UnaryMethod));
             using var endpoint2 = BalancerHelpers.CreateGrpcEndpoint<HelloRequest, HelloReply>(50251, UnaryMethod, nameof(UnaryMethod));
 
-            var channel = await BalancerHelpers.CreateChannel(LoggerFactory, new PickFirstConfig(), new[] { endpoint1.Address, endpoint2.Address });
+            var channel = await BalancerHelpers.CreateChannel(LoggerFactory, new PickFirstConfig(), new[] { endpoint1.Address, endpoint2.Address }).DefaultTimeout();
             var balancer = (PickFirstBalancer)channel.ClientChannel._balancer!;
 
             var client = TestClientFactory.Create(channel, endpoint1.Method);

@@ -40,6 +40,7 @@ namespace Grpc.Net.Client.Balancer.Internal
         internal readonly List<(DnsEndPoint EndPoint, Socket Socket, Stream? Stream)> _activeStreams;
         private readonly Timer _socketConnectedTimer;
         private Socket? _initialSocket;
+        private DnsEndPoint? _initialSocketEndPoint;
 #endif
         private DnsEndPoint? _currentEndPoint;
 
@@ -104,18 +105,19 @@ namespace Grpc.Net.Client.Balancer.Internal
                         await socket.ConnectAsync(currentEndPoint, cancellationToken).ConfigureAwait(false);
                         _subChannel.Logger.LogInformation("Connected: " + currentEndPoint);
 
-                        _subChannel.UpdateConnectivityState(ConnectivityState.Ready);
-
                         lock (Lock)
                         {
                             _currentEndPoint = currentEndPoint;
                             _lastEndPointIndex = currentIndex;
 #if NET5_0_OR_GREATER
                             _initialSocket = socket;
+                            _initialSocketEndPoint = currentEndPoint;
                             _socketConnectedTimer.Change(TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5));
 #endif
-                            return true;
                         }
+
+                        _subChannel.UpdateConnectivityState(ConnectivityState.Ready);
+                        return true;
                     }
                     catch (Exception ex)
                     {
@@ -129,12 +131,13 @@ namespace Grpc.Net.Client.Balancer.Internal
 
 #else
                     _subChannel.UpdateConnectivityState(ConnectivityState.Connecting);
-                    _subChannel.UpdateConnectivityState(ConnectivityState.Ready);
                     lock (Lock)
                     {
                         _currentEndPoint = currentEndPoint;
                         _lastEndPointIndex = currentIndex;
                     }
+                    _subChannel.UpdateConnectivityState(ConnectivityState.Ready);
+                    return true;
 #endif
                 }
 
@@ -189,12 +192,14 @@ namespace Grpc.Net.Client.Balancer.Internal
 
         public async ValueTask<Stream> GetStreamAsync(DnsEndPoint endPoint, CancellationToken cancellationToken)
         {
-            _subChannel.Logger.LogInformation("GetStreamAsync: " + CurrentEndPoint);
+            _subChannel.Logger.LogInformation("GetStreamAsync: " + endPoint);
 
             Socket? socket = null;
             lock (Lock)
             {
-                if (_initialSocket != null)
+                if (_initialSocket != null &&
+                    _initialSocketEndPoint != null &&
+                    Equals(_initialSocketEndPoint, endPoint))
                 {
                     socket = _initialSocket;
                     _initialSocket = null;
