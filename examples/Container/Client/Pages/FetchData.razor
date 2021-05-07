@@ -7,7 +7,11 @@
 
 <p>This component demonstrates fetching data from the server.</p>
 
-@if (forecasts == null)
+@if (error != null)
+{
+    <pre>@error</pre>
+}
+else if (forecasts == null)
 {
     <p><em>Loading...</em></p>
 }
@@ -35,9 +39,13 @@ else
         </tbody>
     </table>
     <p>
-        Weather forecast data loaded from <strong>@server</strong> <button class="btn btn-primary btn-sm" @onclick="LoadDataAsync">Reload</button>
+        Weather forecast data loaded from <strong>@server</strong>
     </p>
 }
+
+<p>
+    <button class="btn btn-primary" @onclick="LoadDataAsync">Reload</button>
+</p>
 
 @if (subChannels != null)
 {
@@ -45,7 +53,7 @@ else
     <br />
     <h2>@Channel.Target <span class="badge @GetStateClass(connectionState) badge-pill">@connectionState</span></h2>
     <p>
-        Connection sub-channels:
+        Sub-channels:
     </p>
     <div class="row">
         <div class="col-8">
@@ -60,11 +68,7 @@ else
             </ul>
         </div>
     </div>
-}
-
-@if (error != null)
-{
-    <pre>@error</pre>
+    <br />
 }
 
 @code {

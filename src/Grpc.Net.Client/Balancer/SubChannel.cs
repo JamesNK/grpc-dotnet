@@ -143,12 +143,21 @@ namespace Grpc.Net.Client.Balancer
 
         internal void UpdateConnectivityState(ConnectivityState state)
         {
-            if (_state == state)
+            lock (Lock)
             {
-                return;
+                // Don't update sub-channel state if the state is the same or the sub-channel has been shutdown.
+                //
+                // This could happen when:
+                // 1. Start trying to connect with a sub-channel.
+                // 2. Address resolver updates and sub-channel address is no longer there and sub-channel is shutdown.
+                // 3. Connection attempt fails and tries to update sub-channel state.
+                if (_state == state || _state == ConnectivityState.Shutdown)
+                {
+                    return;
+                }
+                _state = state;
+                _channel.OnSubChannelStateChange(this, _state);
             }
-            _state = state;
-            _channel.OnSubChannelStateChange(this, _state);
         }
 
         public override string ToString()

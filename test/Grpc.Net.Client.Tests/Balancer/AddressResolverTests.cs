@@ -36,6 +36,7 @@ using System.Net;
 using System.Collections.Generic;
 using Grpc.Net.Client.Balancer.Internal;
 using System.IO;
+using Grpc.Net.Client.Tests.Infrastructure.Balancer;
 #if HAVE_LOAD_BALANCING
 using Grpc.Net.Client.Balancer;
 #endif
@@ -207,105 +208,6 @@ namespace Grpc.Net.Client.Tests.Balancer
 
             var subChannels = channel.ClientChannel.GetSubChannels();
             Assert.AreEqual(1, subChannels.Count);
-        }
-
-        private class TestAddressResolverFactory : AddressResolverFactory
-        {
-            private readonly TestAddressResolver _addressResolver;
-
-            public override string Name { get; } = "test";
-
-            public TestAddressResolverFactory(TestAddressResolver addressResolver)
-            {
-                _addressResolver = addressResolver;
-            }
-
-            public override AddressResolver Create(Uri address, AddressResolverOptions options)
-            {
-                return _addressResolver;
-            }
-        }
-
-        private class TestAddressResolver : AddressResolver, IDisposable
-        {
-            private readonly Task? _refreshAsyncTask;
-            private IObserver<AddressResolverResult>? _observer;
-            private IReadOnlyList<DnsEndPoint>? _endPoints;
-
-            public TestAddressResolver(Task? refreshAsyncTask = null)
-            {
-                _refreshAsyncTask = refreshAsyncTask;
-            }
-
-            public void UpdateEndPoints(List<DnsEndPoint> endPoints)
-            {
-                _endPoints = endPoints;
-                _observer?.OnNext(new AddressResolverResult(_endPoints));
-            }
-
-            public void Dispose()
-            {
-                _observer = null;
-            }
-
-            public override Task RefreshAsync(CancellationToken cancellationToken)
-            {
-                return _refreshAsyncTask ?? Task.CompletedTask;
-            }
-
-            public override void Shutdown()
-            {
-            }
-
-            public override IDisposable Subscribe(IObserver<AddressResolverResult> observer)
-            {
-                _observer = observer;
-                _observer.OnNext(new AddressResolverResult(_endPoints ?? Array.Empty<DnsEndPoint>()));
-                return this;
-            }
-        }
-
-        private class TestSubChannelTransportFactory : ISubChannelTransportFactory
-        {
-            public ISubChannelTransport Create(SubChannel subChannel)
-            {
-                return new TestSubChannelTransport(subChannel);
-            }
-        }
-
-        private class TestSubChannelTransport : ISubChannelTransport
-        {
-            private readonly SubChannel _subChannel;
-
-            public DnsEndPoint? CurrentEndPoint { get; }
-
-            public TestSubChannelTransport(SubChannel subChannel)
-            {
-                _subChannel = subChannel;
-            }
-
-            public void Dispose()
-            {
-            }
-
-            public ValueTask<Stream> GetStreamAsync(DnsEndPoint endPoint, CancellationToken cancellationToken)
-            {
-                return new ValueTask<Stream>(new MemoryStream());
-            }
-
-            public void OnRequestError(Exception ex)
-            {
-            }
-
-            public void OnRequestSuccess()
-            {
-            }
-
-            public ValueTask<bool> TryConnectAsync(CancellationToken cancellationToken)
-            {
-                _subChannel.UpdateConnectivityState(ConnectivityState.Ready);
-                return new ValueTask<bool>(true);
-            }
         }
     }
 }

@@ -199,7 +199,11 @@ namespace Grpc.Net.Client.Balancer
                 {
                     Logger.LogInformation("Updating picker: " + state.Picker);
                     _picker = state.Picker;
-                    _nextPickerTcs.TrySetResult(state.Picker);
+                    if (_nextPickerTcs.Task.IsCompleted)
+                    {
+                        _nextPickerTcs = new TaskCompletionSource<SubChannelPicker>(TaskCreationOptions.RunContinuationsAsynchronously);
+                    }
+                    _nextPickerTcs.SetResult(state.Picker);
                 }
             }
         }
@@ -222,6 +226,7 @@ namespace Grpc.Net.Client.Balancer
             while (true)
             {
                 var currentPicker = await GetPickerAsync(previousPicker, cancellationToken).ConfigureAwait(false);
+                Logger.LogInformation("Evaluating picker");
 
                 try
                 {
@@ -229,6 +234,7 @@ namespace Grpc.Net.Client.Balancer
 
                     if (result.SubChannel != null)
                     {
+                        Logger.LogInformation($"Current picker has sub-channel {result.SubChannel} with end point {result.EndPoint}.");
                         break;
                     }
                     else

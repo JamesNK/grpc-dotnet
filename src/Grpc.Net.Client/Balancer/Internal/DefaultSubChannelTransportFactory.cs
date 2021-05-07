@@ -17,21 +17,27 @@
 #endregion
 
 #if HAVE_LOAD_BALANCING
-#pragma warning disable CS1591 // Missing XML comment for publicly visible type or member
 
+using System;
 
 namespace Grpc.Net.Client.Balancer.Internal
 {
     internal class DefaultSubChannelTransportFactory : ISubChannelTransportFactory
     {
-        public static readonly DefaultSubChannelTransportFactory Instance = new DefaultSubChannelTransportFactory();
+        public static readonly DefaultSubChannelTransportFactory Instance = new DefaultSubChannelTransportFactory(TimeSpan.FromSeconds(5));
+
+        private readonly TimeSpan _socketPingInterval;
+
+        public DefaultSubChannelTransportFactory(TimeSpan socketPingInterval)
+        {
+            _socketPingInterval = socketPingInterval;
+        }
 
         public ISubChannelTransport Create(SubChannel subChannel)
         {
-            return new DefaultSubChannelTransport(subChannel);
+            return new DefaultSubChannelTransport(subChannel, _socketPingInterval);
         }
     }
 }
 
-#pragma warning restore CS1591 // Missing XML comment for publicly visible type or member
 #endif

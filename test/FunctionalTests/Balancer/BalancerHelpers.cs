@@ -113,6 +113,7 @@ namespace Grpc.Net.Client.Tests.Balancer
             var services = new ServiceCollection();
             services.AddSingleton<AddressResolverFactory>(new StaticAddressResolverFactory(e));
             services.AddSingleton<IRandomGenerator>(new TestRandomGenerator());
+            services.AddSingleton<ISubChannelTransportFactory>(new DefaultSubChannelTransportFactory(TimeSpan.FromSeconds(0.5)));
 
             var serviceConfig = new ServiceConfig();
             if (loadBalancingConfig != null)

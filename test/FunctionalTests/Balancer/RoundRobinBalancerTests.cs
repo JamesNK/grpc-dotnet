@@ -51,6 +51,50 @@ namespace Grpc.Net.Client.Tests.Balancer
     public class RoundRobinBalancerTests : FunctionalTestBase
     {
         [Test]
+        public async Task DisconnectEndpoint_NoCallsMade_SubChannelStateUpdated()
+        {
+            // Ignore errors
+            SetExpectedErrorsFilter(writeContext =>
+            {
+                return true;
+            });
+
+            string? host = null;
+            Task<HelloReply> UnaryMethod(HelloRequest request, ServerCallContext context)
+            {
+                host = context.Host;
+                return Task.FromResult(new HelloReply { Message = request.Name });
+            }
+
+            // Arrange
+            using var endpoint = BalancerHelpers.CreateGrpcEndpoint<HelloRequest, HelloReply>(50250, UnaryMethod, nameof(UnaryMethod));
+
+            var channel = await BalancerHelpers.CreateChannel(LoggerFactory, new RoundRobinConfig(), new[] { endpoint.Address });
+
+            await channel.ConnectAsync().DefaultTimeout();
+
+            SubChannel? subChannel = null;
+            await TestHelpers.AssertIsTrueRetryAsync(() =>
+            {
+                var picker = channel.ClientChannel._picker as RoundRobinPicker;
+                if (picker?._subChannels.Count == 1)
+                {
+                    subChannel = picker?._subChannels[0].SubChannel;
+                    return true;
+                }
+                return false;
+            }, "Wait for all sub-channels to be connected.").DefaultTimeout();
+
+            // Act
+            endpoint.Dispose();
+
+            // Assert
+            await TestHelpers.AssertIsTrueRetryAsync(
+                () => subChannel!.State == ConnectivityState.TransientFailure,
+                "Wait for sub-channel to fail.").DefaultTimeout();
+        }
+
+        [Test]
         public async Task UnaryCall_ReconnectBetweenCalls_Success()
         {
             // Ignore errors

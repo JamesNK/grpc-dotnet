@@ -34,6 +34,7 @@ namespace Grpc.Net.Client.Balancer.Internal
     {
         private readonly SemaphoreSlim _connectionCreateLock;
         private readonly SubChannel _subChannel;
+        private readonly TimeSpan _socketPingInterval;
         private int _lastEndPointIndex;
 
 #if NET5_0_OR_GREATER
@@ -44,10 +45,11 @@ namespace Grpc.Net.Client.Balancer.Internal
 #endif
         private DnsEndPoint? _currentEndPoint;
 
-        public DefaultSubChannelTransport(SubChannel subChannel)
+        public DefaultSubChannelTransport(SubChannel subChannel, TimeSpan socketPingInterval)
         {
             _connectionCreateLock = new SemaphoreSlim(1);
             _subChannel = subChannel;
+            _socketPingInterval = socketPingInterval;
             _lastEndPointIndex = -1; // Start -1 so first attempt is at index 0
 
 #if NET5_0_OR_GREATER
@@ -112,7 +114,7 @@ namespace Grpc.Net.Client.Balancer.Internal
 #if NET5_0_OR_GREATER
                             _initialSocket = socket;
                             _initialSocketEndPoint = currentEndPoint;
-                            _socketConnectedTimer.Change(TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5));
+                            _socketConnectedTimer.Change(_socketPingInterval, _socketPingInterval);
 #endif
                         }
 
@@ -162,21 +164,26 @@ namespace Grpc.Net.Client.Balancer.Internal
                 var socket = _initialSocket;
                 if (socket != null)
                 {
+                    var closeSocket = false;
                     try
                     {
-                        _subChannel.Logger.LogTrace("Pinging socket.");
+                        _subChannel.Logger.LogTrace("Checking socket: " + _initialSocketEndPoint);
                         await socket.SendAsync(Array.Empty<byte>(), SocketFlags.None).ConfigureAwait(false);
-                        _subChannel.Logger.LogTrace("Successfully socket.");
+                        closeSocket = IsSocketInBadState(socket);
                     }
                     catch (Exception ex)
                     {
-                        _subChannel.Logger.LogTrace(ex, "Error when pinging socket.");
+                        _subChannel.Logger.LogTrace(ex, "Error when pinging socket " + _initialSocketEndPoint);
+                    }
 
+                    if (closeSocket)
+                    {
                         lock (Lock)
                         {
                             if (_initialSocket == socket)
                             {
                                 _initialSocket = null;
+                                _initialSocketEndPoint = null;
                                 _currentEndPoint = null;
                                 _subChannel.UpdateConnectivityState(ConnectivityState.Idle);
                             }
@@ -203,6 +210,7 @@ namespace Grpc.Net.Client.Balancer.Internal
                 {
                     socket = _initialSocket;
                     _initialSocket = null;
+                    _initialSocketEndPoint = null;
                 }
             }
 
@@ -211,7 +219,7 @@ namespace Grpc.Net.Client.Balancer.Internal
             // has been closed; either way, we can't use it.
             if (socket != null)
             {
-                if (!CanUseSocket(socket))
+                if (IsSocketInBadState(socket))
                 {
                     socket.Dispose();
                     socket = null;
@@ -236,11 +244,12 @@ namespace Grpc.Net.Client.Balancer.Internal
             return stream;
         }
 
-        private static bool CanUseSocket(Socket socket)
+        private static bool IsSocketInBadState(Socket socket)
         {
             try
             {
-                return !socket.Poll(0, SelectMode.SelectRead);
+                // Will return true if closed or there is pending data for some reason.
+                return socket.Poll(0, SelectMode.SelectRead);
             }
             catch (Exception e) when (e is SocketException || e is ObjectDisposedException)
             {

@@ -32,6 +32,8 @@ namespace Grpc.Net.Client.Balancer
 {
     public class DnsAddressResolver : AddressResolver
     {
+        private static readonly TimeSpan UpdateInterval = TimeSpan.FromSeconds(20);
+
         private Timer? _timer;
         private readonly List<IObserver<AddressResolverResult>> _subscriptions = new List<IObserver<AddressResolverResult>>();
         private readonly object _lock = new object();
@@ -100,7 +102,7 @@ namespace Grpc.Net.Client.Balancer
                 if (_subscriptions.Count == 0)
                 {
                     _timer = new Timer(OnTimerCallback, null, Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
-                    _timer.Change(TimeSpan.FromSeconds(10), TimeSpan.FromSeconds(10));
+                    _timer.Change(UpdateInterval, UpdateInterval);
                 }
                 _subscriptions.Add(observer);
             }
