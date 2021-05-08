@@ -19,27 +19,24 @@
 #if HAVE_LOAD_BALANCING
 
 using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Net;
-using System.Text;
-using System.Threading;
-using System.Threading.Tasks;
 using Grpc.Net.Client.Balancer;
-using Grpc.Net.Client.Balancer.Internal;
 
 namespace Grpc.Net.Client.Tests.Infrastructure.Balancer
 {
-    internal class TestSubChannelTransportFactory : ISubChannelTransportFactory
+    internal class TestAddressResolverFactory : AddressResolverFactory
     {
-        public List<TestSubChannelTransport> Transports { get; } = new List<TestSubChannelTransport>();
+        private readonly TestAddressResolver _addressResolver;
 
-        public ISubChannelTransport Create(SubChannel subChannel)
+        public override string Name { get; } = "test";
+
+        public TestAddressResolverFactory(TestAddressResolver addressResolver)
         {
-            var transport = new TestSubChannelTransport(subChannel);
-            Transports.Add(transport);
+            _addressResolver = addressResolver;
+        }
 
-            return transport;
+        public override AddressResolver Create(Uri address, AddressResolverOptions options)
+        {
+            return _addressResolver;
         }
     }
 }

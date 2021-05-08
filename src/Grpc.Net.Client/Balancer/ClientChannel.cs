@@ -143,8 +143,11 @@ namespace Grpc.Net.Client.Balancer
 
         internal void OnSubChannelStateChange(SubChannel subChannel, ConnectivityState state)
         {
-            Logger.LogInformation("Sub-channel state change: " + subChannel + " " + state);
-            _balancer!.UpdateSubChannelState(subChannel, new SubChannelState { ConnectivityState = state });
+            lock (_lock)
+            {
+                Logger.LogInformation("Sub-channel state change: " + subChannel + " " + state);
+                _balancer!.UpdateSubChannelState(subChannel, new SubChannelState { ConnectivityState = state });
+            }
         }
 
         public async Task ConnectAsync(CancellationToken cancellationToken)

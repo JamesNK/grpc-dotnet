@@ -170,19 +170,25 @@ namespace Grpc.Net.Client.Tests.Balancer
             var reply = await client.UnaryCall(new HelloRequest { Name = "Balancer" }).ResponseAsync.DefaultTimeout();
             // Assert
             Assert.AreEqual("Balancer", reply.Message);
-            Assert.AreEqual("127.0.0.1:50250", host);
+            var nextHost = GetNextHost(host!);
 
             // Act
             reply = await client.UnaryCall(new HelloRequest { Name = "Balancer" }).ResponseAsync.DefaultTimeout();
             // Assert
             Assert.AreEqual("Balancer", reply.Message);
-            Assert.AreEqual("127.0.0.1:50251", host);
+            Assert.AreEqual(nextHost, host!);
+            nextHost = GetNextHost(host!);
 
             // Act
             reply = await client.UnaryCall(new HelloRequest { Name = "Balancer" }).ResponseAsync.DefaultTimeout();
             // Assert
             Assert.AreEqual("Balancer", reply.Message);
-            Assert.AreEqual("127.0.0.1:50250", host);
+            Assert.AreEqual(nextHost, host);
+
+            string GetNextHost(string host)
+            {
+                return host == "127.0.0.1:50250" ? "127.0.0.1:50251" : "127.0.0.1:50250";
+            }
         }
 
         [Test]

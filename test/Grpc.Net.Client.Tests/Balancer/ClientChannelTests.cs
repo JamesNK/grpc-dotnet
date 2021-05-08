@@ -51,6 +51,11 @@ namespace Grpc.Net.Client.Tests.Balancer
         public async Task PickAsync_ChannelStateChangesWithWaitForReady_WaitsForCorrectEndpoint()
         {
             // Arrange
+            var services = new ServiceCollection();
+            services.AddLogging(b => b.AddProvider(new NUnitLoggerProvider()));
+            var serviceProvider = services.BuildServiceProvider();
+            var loggerFactory = serviceProvider.GetRequiredService<ILoggerFactory>();
+
             var addressResolver = new TestAddressResolver();
             addressResolver.UpdateEndPoints(new List<DnsEndPoint>
             {
@@ -58,8 +63,8 @@ namespace Grpc.Net.Client.Tests.Balancer
             });
 
             var transportFactory = new TestSubChannelTransportFactory();
-            var clientChannel = new ClientChannel(addressResolver, NullLoggerFactory.Instance, transportFactory);
-            clientChannel.ConfigureBalancer(b => new RoundRobinBalancer(b, NullLoggerFactory.Instance));
+            var clientChannel = new ClientChannel(addressResolver, loggerFactory, transportFactory);
+            clientChannel.ConfigureBalancer(b => new RoundRobinBalancer(b, loggerFactory));
 
             // Act
             var pickTask1 = clientChannel.PickAsync(
@@ -81,7 +86,7 @@ namespace Grpc.Net.Client.Tests.Balancer
 
             for (var i = 0; i < transportFactory.Transports.Count; i++)
             {
-                transportFactory.Transports[i].SubChannel.UpdateConnectivityState(ConnectivityState.TransientFailure);
+                transportFactory.Transports[i].UpdateState(ConnectivityState.TransientFailure);
             }
 
             var pickTask2 = clientChannel.PickAsync(

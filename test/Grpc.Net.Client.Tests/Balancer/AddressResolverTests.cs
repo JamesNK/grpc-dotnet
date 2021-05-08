@@ -37,6 +37,7 @@ using System.Collections.Generic;
 using Grpc.Net.Client.Balancer.Internal;
 using System.IO;
 using Grpc.Net.Client.Tests.Infrastructure.Balancer;
+using System.Diagnostics;
 #if HAVE_LOAD_BALANCING
 using Grpc.Net.Client.Balancer;
 #endif
@@ -127,6 +128,7 @@ namespace Grpc.Net.Client.Tests.Balancer
         {
             // Arrange
             var services = new ServiceCollection();
+            services.AddLogging(b => b.AddProvider(new NUnitLoggerProvider()));
 
             var addressResolver = new TestAddressResolver();
             addressResolver.UpdateEndPoints(new List<DnsEndPoint>
@@ -134,8 +136,9 @@ namespace Grpc.Net.Client.Tests.Balancer
                 new DnsEndPoint("localhost", 80)
             });
 
+            var transportFactory = new TestSubChannelTransportFactory();
             services.AddSingleton<AddressResolverFactory>(new TestAddressResolverFactory(addressResolver));
-            services.AddSingleton<ISubChannelTransportFactory>(new TestSubChannelTransportFactory());
+            services.AddSingleton<ISubChannelTransportFactory>(transportFactory);
 
             var channelOptions = new GrpcChannelOptions
             {
@@ -146,7 +149,7 @@ namespace Grpc.Net.Client.Tests.Balancer
 
             // Act
             var channel = GrpcChannel.ForAddress("test://localhost", channelOptions);
-            await channel.ConnectAsync();
+            await channel.ConnectAsync().DefaultTimeout();
 
             // Assert
             var subChannels = channel.ClientChannel.GetSubChannels();
@@ -154,6 +157,9 @@ namespace Grpc.Net.Client.Tests.Balancer
 
             Assert.AreEqual(1, subChannels[0]._addresses.Count);
             Assert.AreEqual(new DnsEndPoint("localhost", 80), subChannels[0]._addresses[0]);
+
+            // Wait for TryConnect to be called so state is connected
+            await transportFactory.Transports.Single().TryConnectTask.DefaultTimeout();
             Assert.AreEqual(ConnectivityState.Ready, subChannels[0].State);
 
             addressResolver.UpdateEndPoints(new List<DnsEndPoint>

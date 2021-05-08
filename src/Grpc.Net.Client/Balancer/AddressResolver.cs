@@ -18,6 +18,7 @@
 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Net;
 using System.Text;
 using System.Threading;
@@ -39,6 +40,7 @@ namespace Grpc.Net.Client.Balancer
     {
         private GrpcAttributes? _attributes;
 
+        [DebuggerStepThrough]
         public AddressResolverResult(IReadOnlyList<DnsEndPoint> addresses)
         {
             Addresses = addresses;

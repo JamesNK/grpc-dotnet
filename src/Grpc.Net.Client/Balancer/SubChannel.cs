@@ -89,7 +89,7 @@ namespace Grpc.Net.Client.Balancer
             }
         }
 
-        private async Task ConnectCoreAsync(CancellationToken cancellationToken)
+        private Task ConnectCoreAsync(CancellationToken cancellationToken)
         {
             Debug.Assert(Monitor.IsEntered(Lock));
 
@@ -100,12 +100,16 @@ namespace Grpc.Net.Client.Balancer
 
             if (_state != ConnectivityState.Idle)
             {
-                return;
+                return Task.CompletedTask;
             }
 
-            UpdateConnectivityState(ConnectivityState.Connecting);
+            // Start connect in Task.Run so it isn't in the lock.
+            return Task.Run(async () =>
+            {
+                UpdateConnectivityState(ConnectivityState.Connecting);
 
-            await ResetTransportAsync(cancellationToken).ConfigureAwait(false);
+                await ResetTransportAsync(cancellationToken).ConfigureAwait(false);
+            });
         }
 
         private async Task ResetTransportAsync(CancellationToken cancellationToken)
@@ -156,8 +160,10 @@ namespace Grpc.Net.Client.Balancer
                     return;
                 }
                 _state = state;
-                _channel.OnSubChannelStateChange(this, _state);
             }
+            
+            // Notify channel outside of lock to avoid deadlocks.
+            _channel.OnSubChannelStateChange(this, state);
         }
 
         public override string ToString()
