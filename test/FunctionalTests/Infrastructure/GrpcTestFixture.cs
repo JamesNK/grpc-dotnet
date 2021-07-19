@@ -206,6 +206,7 @@ namespace Grpc.AspNetCore.FunctionalTests.Infrastructure
             _server.Dispose();
         }
 
+#if NET6_0_OR_GREATER
         private class Http3DelegatingHandler : DelegatingHandler
         {
             public Http3DelegatingHandler(HttpMessageHandler innerHandler)
@@ -216,8 +217,10 @@ namespace Grpc.AspNetCore.FunctionalTests.Infrastructure
             protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
             {
                 request.Version = new Version(3, 0);
+                request.VersionPolicy = HttpVersionPolicy.RequestVersionExact;
                 return base.SendAsync(request, cancellationToken);
             }
         }
+#endif
     }
 }

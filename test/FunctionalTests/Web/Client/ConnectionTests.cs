@@ -75,6 +75,9 @@ namespace Grpc.AspNetCore.FunctionalTests.Web.Client
         [TestCase(TestServerEndpointName.Http2WithTls, "1.1", false)]
 #endif
         [TestCase(TestServerEndpointName.Http2WithTls, null, true)]
+#if NET6_0_OR_GREATER
+        [TestCase(TestServerEndpointName.Http3WithTls, null, true)]
+#endif
         public async Task SendValidRequest_WithConnectionOptions(TestServerEndpointName endpointName, string? version, bool success)
         {
             SetExpectedErrorsFilter(writeContext =>

@@ -99,7 +99,7 @@ namespace Grpc.AspNetCore.FunctionalTests.Web.Server
             MessageHelpers.WriteMessage(requestStream, requestMessage);
 
             var httpRequest = GrpcHttpHelper.Create(method.FullName);
-            httpRequest.Headers.Add(GrpcProtocolConstants.TimeoutHeader, "100m");
+            httpRequest.Headers.Add(GrpcProtocolConstants.TimeoutHeader, "300m");
             httpRequest.Content = new GrpcStreamContent(requestStream);
 
             // Act

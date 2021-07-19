@@ -337,7 +337,7 @@ namespace Microsoft.Extensions.DependencyInjection
                         // This will throw in .NET Standard 2.0 with a prompt that a user must set a handler.
                         // Because it throws it should only be called in PostConfigure if no handler has been set.
                         var handler = HttpHandlerFactory.CreatePrimaryHandler();
-#if NET5_0_OR_GREATER
+#if NET5_0
                         handler = HttpHandlerFactory.EnsureTelemetryHandler(handler);
 #endif
 
