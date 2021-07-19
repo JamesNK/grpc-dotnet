@@ -469,7 +469,7 @@ namespace Grpc.AspNetCore.Server.Internal
             {
                 // HTTP/3 has different error codes
                 var errorCode =
-#if NET5_0
+#if NET5_0_OR_GREATER
                     GrpcProtocolConstants.IsHttp2(HttpContext.Request.Protocol)
                         ? GrpcProtocolConstants.Http2ResetStreamNoError
                         : GrpcProtocolConstants.Http3ResetStreamNoError;

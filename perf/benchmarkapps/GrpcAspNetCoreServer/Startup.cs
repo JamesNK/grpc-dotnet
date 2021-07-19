@@ -21,7 +21,7 @@ using System.IO;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using Grpc.Testing;
-#if NET5_0 || NET6_0
+#if NET5_0_OR_GREATER
 using Microsoft.AspNetCore.Authentication.Certificate;
 #endif
 using Microsoft.AspNetCore.Builder;

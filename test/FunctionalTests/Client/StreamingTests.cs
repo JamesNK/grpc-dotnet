@@ -39,7 +39,6 @@ using Unimplemented;
 namespace Grpc.AspNetCore.FunctionalTests.Client
 {
     [TestFixture]
-    [Ignore("Hangs")]
     public class StreamingTests : FunctionalTestBase
     {
         [Test]
@@ -251,7 +250,6 @@ namespace Grpc.AspNetCore.FunctionalTests.Client
         [TestCase(3, 2)]
         [TestCase(Size64MB, Size64KB)]
         [TestCase(Size64MB, Size1MB)]
-        [Ignore("Hangs")]
         public async Task DuplexStreaming_SimultaniousSendAndReceive_Success(int total, int batchSize)
         {
             // Arrange

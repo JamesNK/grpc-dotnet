@@ -85,7 +85,7 @@ namespace Grpc.AspNetCore.FunctionalTests.Client
             var client = CreateClient(clientType, method, handler);
 
             // Act
-#if NET5_0
+#if NET5_0_OR_GREATER
             var result = new List<KeyValuePair<string, object?>>();
 
             using var allSubscription = new AllListenersObserver(new Dictionary<string, IObserver<KeyValuePair<string, object?>>>
@@ -101,7 +101,7 @@ namespace Grpc.AspNetCore.FunctionalTests.Client
             // Assert
             Assert.IsNotNull(telemetryHeader);
 
-#if NET5_0
+#if NET5_0_OR_GREATER
             Assert.AreEqual(4, result.Count);
             Assert.AreEqual("System.Net.Http.HttpRequestOut.Start", result[0].Key);
             Assert.AreEqual("System.Net.Http.Request", result[1].Key);

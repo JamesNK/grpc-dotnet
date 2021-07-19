@@ -129,13 +129,15 @@ namespace Grpc.AspNetCore.FunctionalTests.Infrastructure
 
         private (HttpClient client, HttpMessageHandler handler) CreateHttpCore(TestServerEndpointName? endpointName = null, DelegatingHandler? messageHandler = null)
         {
-            endpointName ??= TestServerEndpointName.Http3WithTls;
+            endpointName ??= TestServerEndpointName.Http2;
 
+#if NET6_0_OR_GREATER
             if (endpointName == TestServerEndpointName.Http3WithTls)
             {
                 // TODO(JamesNK): Switch required to be set before creating handler. Remove once .NET 6 is RTM.
                 AppContext.SetSwitch("System.Net.SocketsHttpHandler.Http3Support", isEnabled: true);
             }
+#endif
 
             var httpClientHandler = new HttpClientHandler();
             httpClientHandler.ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator;
@@ -152,12 +154,14 @@ namespace Grpc.AspNetCore.FunctionalTests.Infrastructure
                 handler = httpClientHandler;
             }
 
-            //if (endpointName == TestServerEndpointName.Http3WithTls)
-            //{
-            //    // TODO(JamesNK): There is a bug with SocketsHttpHandler and HTTP/3 that prevents calls
-            //    // upgrading from 2 to 3. Force HTTP/3 calls to require that protocol.
-            //    handler = new Http3DelegatingHandler(handler);
-            //}
+#if NET6_0_OR_GREATER
+            if (endpointName == TestServerEndpointName.Http3WithTls)
+            {
+                // TODO(JamesNK): There is a bug with SocketsHttpHandler and HTTP/3 that prevents calls
+                // upgrading from 2 to 3. Force HTTP/3 calls to require that protocol.
+                handler = new Http3DelegatingHandler(handler);
+            }
+#endif
 
             client = new HttpClient(handler);
 
@@ -181,7 +185,9 @@ namespace Grpc.AspNetCore.FunctionalTests.Infrastructure
                 case TestServerEndpointName.Http2:
                 case TestServerEndpointName.Http1WithTls:
                 case TestServerEndpointName.Http2WithTls:
+#if NET6_0_OR_GREATER
                 case TestServerEndpointName.Http3WithTls:
+#endif
                     return new Uri(_server.GetUrl(endpointName.Value));
                 default:
                     throw new ArgumentException("Unexpected value: " + endpointName, nameof(endpointName));

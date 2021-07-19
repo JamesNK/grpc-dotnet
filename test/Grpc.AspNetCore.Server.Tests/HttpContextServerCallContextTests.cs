@@ -631,6 +631,7 @@ namespace Grpc.AspNetCore.Server.Tests
 
             var httpResetFeature = new TestHttpResetFeature();
             var httpContext = new DefaultHttpContext();
+            httpContext.Request.Protocol = "HTTP/2";
             httpContext.Request.Headers[GrpcProtocolConstants.TimeoutHeader] = "200m";
             httpContext.Features.Set<IHttpResponseBodyFeature>(new TestBlockingHttpResponseCompletionFeature(syncPoint));
             httpContext.Features.Set<IHttpResetFeature>(httpResetFeature);

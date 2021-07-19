@@ -100,11 +100,11 @@ namespace Grpc.AspNetCore.FunctionalTests.Infrastructure
                     _initialConfigureServices?.Invoke(services);
                 })
                 .UseStartup(typeof(TStartup))
-#if NET6_0
+#if NET6_0_OR_GREATER
                 .UseQuic(options =>
                 {
                     options.IdleTimeout = TimeSpan.FromSeconds(60);
-                    options.Alpn = "h3";
+                    options.Alpn = "h3-29";
                 })
 #endif
                 .UseKestrel(options =>

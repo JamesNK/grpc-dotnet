@@ -44,7 +44,7 @@ namespace Grpc.AspNetCore.Web.Internal
             var mode = GetGrpcWebMode(httpContext);
             if (mode != ServerGrpcWebMode.None)
             {
-                Log.DetectedGrpcWebRequest(_logger, httpContext.Request.ContentType);
+                Log.DetectedGrpcWebRequest(_logger, httpContext.Request.ContentType!);
 
                 var metadata = httpContext.GetEndpoint()?.Metadata.GetMetadata<IGrpcWebEnabledMetadata>();
                 if (metadata?.GrpcWebEnabled ?? _options.DefaultEnabled)
