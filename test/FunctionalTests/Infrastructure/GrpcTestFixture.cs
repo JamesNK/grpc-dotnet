@@ -22,6 +22,7 @@ using System.IO;
 using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
+using Microsoft.AspNetCore.Connections;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.Extensions.DependencyInjection;
@@ -100,6 +101,7 @@ namespace Grpc.AspNetCore.FunctionalTests.Infrastructure
 
                         var basePath = Path.GetDirectoryName(typeof(InProcessTestServer).Assembly.Location);
                         var certPath = Path.Combine(basePath!, "server1.pfx");
+                        listenOptions.UseConnectionLogging();
                         listenOptions.UseHttps(certPath, "1111");
                     });
 #endif

@@ -120,7 +120,7 @@ namespace Grpc.AspNetCore.FunctionalTests.Infrastructure
             _lifetime = _host.Services.GetRequiredService<IHostApplicationLifetime>();
 
             // This only happens once per fixture, so we can afford to wait a little bit on it.
-            if (!_lifetime.ApplicationStarted.WaitHandle.WaitOne(TimeSpan.FromSeconds(20)))
+            if (!_lifetime.ApplicationStarted.WaitHandle.WaitOne(TimeSpan.FromSeconds(60)))
             {
                 // t probably faulted
                 if (t.IsFaulted)
