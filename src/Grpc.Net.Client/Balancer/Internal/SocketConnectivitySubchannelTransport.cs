@@ -59,6 +59,16 @@ namespace Grpc.Net.Client.Balancer.Internal
         private DnsEndPoint? _initialSocketEndPoint;
         private bool _disposed;
         private DnsEndPoint? _currentEndPoint;
+#pragma warning disable IDE0052 // Remove unread private members
+        private State _state;
+#pragma warning restore IDE0052 // Remove unread private members
+
+        private enum State
+        {
+            Connecting,
+            Connected,
+            Disconnected
+        }
 
         public SocketConnectivitySubchannelTransport(Subchannel subchannel, TimeSpan socketPingInterval, ILoggerFactory loggerFactory)
         {
@@ -81,8 +91,9 @@ namespace Grpc.Net.Client.Balancer.Internal
                 _initialSocket = null;
                 _initialSocketEndPoint = null;
                 _lastEndPointIndex = 0;
-                _socketConnectedTimer.Change(TimeSpan.Zero, TimeSpan.Zero);
+                _socketConnectedTimer.Change(Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
                 _currentEndPoint = null;
+                _state = State.Disconnected;
             }
             _subchannel.UpdateConnectivityState(ConnectivityState.Idle, "Disconnected.");
         }
@@ -92,7 +103,13 @@ namespace Grpc.Net.Client.Balancer.Internal
             Debug.Assert(CurrentEndPoint == null);
 
             // Addresses could change while connecting. Make a copy of the subchannel's addresses.
-            var addresses = _subchannel.GetAddresses();
+            IReadOnlyList<DnsEndPoint>? addresses;
+
+            lock (Lock)
+            {
+                addresses = _subchannel.GetAddresses();
+                _state = State.Connecting;
+            }
 
             // Loop through endpoints and attempt to connect.
             Exception? firstConnectionError = null;
@@ -120,6 +137,7 @@ namespace Grpc.Net.Client.Balancer.Internal
                         _initialSocket = socket;
                         _initialSocketEndPoint = currentEndPoint;
                         _socketConnectedTimer.Change(_socketPingInterval, _socketPingInterval);
+                        _state = State.Connected;
                     }
 
                     _subchannel.UpdateConnectivityState(ConnectivityState.Ready, "Successfully connected to socket.");
@@ -144,7 +162,7 @@ namespace Grpc.Net.Client.Balancer.Internal
             {
                 if (!_disposed)
                 {
-                    _socketConnectedTimer.Change(TimeSpan.Zero, TimeSpan.Zero);
+                    _socketConnectedTimer.Change(Timeout.InfiniteTimeSpan, Timeout.InfiniteTimeSpan);
                 }
             }
             return false;
@@ -188,6 +206,7 @@ namespace Grpc.Net.Client.Balancer.Internal
                                 _initialSocketEndPoint = null;
                                 _currentEndPoint = null;
                                 _lastEndPointIndex = 0;
+                                _state = State.Disconnected;
                             }
                         }
                         _subchannel.UpdateConnectivityState(ConnectivityState.Idle, new Status(StatusCode.Unavailable, "Lost connection to socket.", sendException));

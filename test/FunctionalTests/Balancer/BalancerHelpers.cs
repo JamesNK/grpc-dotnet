@@ -122,7 +122,7 @@ namespace Grpc.AspNetCore.FunctionalTests.Balancer
             var services = new ServiceCollection();
             services.AddSingleton<ResolverFactory>(new TestResolverFactory(resolver));
             services.AddSingleton<IRandomGenerator>(new TestRandomGenerator());
-            services.AddSingleton<ISubchannelTransportFactory>(new TestSubchannelTransportFactory(TimeSpan.FromSeconds(0.5)));
+            services.AddSingleton<ISubchannelTransportFactory>(new TestSubchannelTransportFactory(TimeSpan.FromSeconds(0.5), loggerFactory));
 
             var serviceConfig = new ServiceConfig();
             if (loadBalancingConfig != null)
@@ -177,24 +177,26 @@ namespace Grpc.AspNetCore.FunctionalTests.Balancer
                 return 0;
             }
         }
+    }
 
-        internal class TestSubchannelTransportFactory : ISubchannelTransportFactory
+    internal class TestSubchannelTransportFactory : ISubchannelTransportFactory
+    {
+        private readonly TimeSpan _socketPingInterval;
+        private readonly ILoggerFactory _loggerFactory;
+
+        public TestSubchannelTransportFactory(TimeSpan socketPingInterval, ILoggerFactory loggerFactory)
         {
-            private readonly TimeSpan _socketPingInterval;
+            _socketPingInterval = socketPingInterval;
+            _loggerFactory = loggerFactory;
+        }
 
-            public TestSubchannelTransportFactory(TimeSpan socketPingInterval)
-            {
-                _socketPingInterval = socketPingInterval;
-            }
-
-            public ISubchannelTransport Create(Subchannel subchannel)
-            {
+        public ISubchannelTransport Create(Subchannel subchannel)
+        {
 #if NET5_0_OR_GREATER
-                return new SocketConnectivitySubchannelTransport(subchannel, _socketPingInterval, NullLoggerFactory.Instance);
+            return new SocketConnectivitySubchannelTransport(subchannel, _socketPingInterval, _loggerFactory);
 #else
-                return new PassiveSubchannelTransport(subchannel);
+            return new PassiveSubchannelTransport(subchannel);
 #endif
-            }
         }
     }
 }
