@@ -78,6 +78,12 @@ namespace Grpc.AspNetCore.FunctionalTests.Client
                     {
                         return true;
                     }
+
+                    // Request is canceled while writing message
+                    if (writeContext.Exception is OperationCanceledException)
+                    {
+                        return true;
+                    }
                 }
 
                 if (writeContext.LoggerName == "Grpc.Net.Client.Internal.GrpcCall")

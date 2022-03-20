@@ -996,6 +996,238 @@ namespace Grpc.AspNetCore.FunctionalTests.Client
                 }
             }
         }
+
+        [Test]
+        public async Task ServerStreaming_WriteAsyncCancellationBefore_ServerAbort()
+        {
+            SetExpectedErrorsFilter(writeContext =>
+            {
+                return true;
+            });
+
+            var tcs = new TaskCompletionSource<object?>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            bool? serverCancelled = null;
+            async Task ServerStreamingWithCancellation(DataMessage request, IServerStreamWriter<DataMessage> responseStream, ServerCallContext context)
+            {
+                await responseStream.WriteAsync(request, CancellationToken.None);
+                await tcs.Task;
+
+                try
+                {
+                    await responseStream.WriteAsync(request, new CancellationToken(true));
+                }
+                catch (OperationCanceledException)
+                {
+                    serverCancelled = context.CancellationToken.IsCancellationRequested;
+                    throw;
+                }
+            }
+
+            // Arrange
+            var method = Fixture.DynamicGrpc.AddServerStreamingMethod<DataMessage, DataMessage>(ServerStreamingWithCancellation);
+
+            var channel = CreateChannel();
+
+            var client = TestClientFactory.Create(channel, method);
+
+            // Act
+            var call = client.ServerStreamingCall(new DataMessage { Data = ByteString.CopyFrom(Encoding.UTF8.GetBytes("Hello world")) });
+
+            // Assert
+            Assert.IsTrue(await call.ResponseStream.MoveNext().DefaultTimeout());
+            tcs.SetResult(null);
+
+            var clientEx = await ExceptionAssert.ThrowsAsync<RpcException>(() => call.ResponseStream.MoveNext()).DefaultTimeout();
+            Assert.AreEqual(StatusCode.Cancelled, clientEx.StatusCode);
+
+            Assert.IsTrue(serverCancelled);
+        }
+
+        [Test]
+        public async Task ServerStreaming_WriteAsyncCancellationDuring_ServerAbort()
+        {
+            SetExpectedErrorsFilter(writeContext =>
+            {
+                return true;
+            });
+
+            var firstMessageTcs = new TaskCompletionSource<object?>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var cancellationTcs = new TaskCompletionSource<object?>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            bool? serverCancelled = null;
+            async Task ServerStreamingWithCancellation(DataMessage request, IServerStreamWriter<DataMessage> responseStream, ServerCallContext context)
+            {
+                await responseStream.WriteAsync(request, CancellationToken.None);
+                await firstMessageTcs.Task;
+
+                var cts = new CancellationTokenSource(TimeSpan.FromSeconds(1));
+                try
+                {
+                    Logger.LogInformation("Server sending big message");
+                    await responseStream.WriteAsync(
+                        new DataMessage { Data = ByteString.CopyFrom(new byte[1024 * 1024 * 50]) },
+                        cts.Token);
+
+                    cancellationTcs.SetException(new Exception("Server didn't wait to send big message."));
+                }
+                catch (OperationCanceledException)
+                {
+                    serverCancelled = context.CancellationToken.IsCancellationRequested;
+                    cancellationTcs.SetResult(null);
+                }
+                catch (Exception ex)
+                {
+                    cancellationTcs.SetException(ex);
+                    throw;
+                }
+            }
+
+            // Arrange
+            var method = Fixture.DynamicGrpc.AddServerStreamingMethod<DataMessage, DataMessage>(ServerStreamingWithCancellation);
+
+            var channel = CreateChannel();
+
+            var client = TestClientFactory.Create(channel, method);
+
+            // Act
+            var call = client.ServerStreamingCall(new DataMessage { Data = ByteString.CopyFrom(Encoding.UTF8.GetBytes("Hello world")) });
+
+            // Assert
+            Assert.IsTrue(await call.ResponseStream.MoveNext().DefaultTimeout());
+            firstMessageTcs.SetResult(null);
+
+            await cancellationTcs.Task.DefaultTimeout();
+
+            var clientEx = await ExceptionAssert.ThrowsAsync<RpcException>(() => call.ResponseStream.MoveNext()).DefaultTimeout();
+            Assert.AreEqual(StatusCode.Cancelled, clientEx.StatusCode);
+
+            Assert.IsTrue(serverCancelled);
+        }
+
+        [Test]
+        public async Task ClientStreaming_WriteAsyncCancellationBefore_ClientAbort()
+        {
+            SetExpectedErrorsFilter(writeContext =>
+            {
+                return true;
+            });
+
+            var firstMessageTcs = new TaskCompletionSource<object?>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var serverCanceledTcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            async Task<DataMessage> ClientStreamingWithCancellation(IAsyncStreamReader<DataMessage> requestStream, ServerCallContext context)
+            {
+                Assert.IsTrue(await requestStream.MoveNext());
+                firstMessageTcs.SetResult(null);
+
+                try
+                {
+                    await requestStream.MoveNext();
+                    throw new Exception("Should never reached here.");
+                }
+                catch (IOException)
+                {
+                    serverCanceledTcs.SetResult(context.CancellationToken.IsCancellationRequested);
+                    return new DataMessage();
+                }
+                catch (Exception ex)
+                {
+                    serverCanceledTcs.SetException(ex);
+                    throw;
+                }
+            }
+
+            // Arrange
+            var method = Fixture.DynamicGrpc.AddClientStreamingMethod<DataMessage, DataMessage>(ClientStreamingWithCancellation);
+
+            var channel = CreateChannel();
+
+            var client = TestClientFactory.Create(channel, method);
+
+            // Act
+            var call = client.ClientStreamingCall();
+
+            // Assert
+            await call.RequestStream.WriteAsync(
+                new DataMessage { Data = ByteString.CopyFrom(Encoding.UTF8.GetBytes("Hello world")) },
+                CancellationToken.None).DefaultTimeout();
+
+            await firstMessageTcs.Task.DefaultTimeout();
+
+            var clientEx = await ExceptionAssert.ThrowsAsync<RpcException>(
+                () => call.RequestStream.WriteAsync(
+                new DataMessage { Data = ByteString.CopyFrom(Encoding.UTF8.GetBytes("Hello world")) },
+                new CancellationToken(true))).DefaultTimeout();
+            Assert.AreEqual(StatusCode.Cancelled, clientEx.StatusCode);
+
+            Assert.IsTrue(await serverCanceledTcs.Task.DefaultTimeout());
+        }
+
+        [Test]
+        public async Task ClientStreaming_WriteAsyncCancellationDuring_ClientAbort()
+        {
+            SetExpectedErrorsFilter(writeContext =>
+            {
+                return true;
+            });
+
+            var firstMessageTcs = new TaskCompletionSource<object?>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var clientCancellationTcs = new TaskCompletionSource<object?>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var serverCanceledTcs = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            async Task<DataMessage> ClientStreamingWithCancellation(IAsyncStreamReader<DataMessage> requestStream, ServerCallContext context)
+            {
+                Assert.IsTrue(await requestStream.MoveNext());
+                firstMessageTcs.SetResult(null);
+
+                await clientCancellationTcs.Task;
+
+                try
+                {
+                    await requestStream.MoveNext();
+                    throw new Exception("Should never reached here.");
+                }
+                catch (InvalidOperationException)
+                {
+                    serverCanceledTcs.SetResult(context.CancellationToken.IsCancellationRequested);
+                    return new DataMessage();
+                }
+                catch (Exception ex)
+                {
+                    serverCanceledTcs.SetException(ex);
+                    throw;
+                }
+            }
+
+            // Arrange
+            var method = Fixture.DynamicGrpc.AddClientStreamingMethod<DataMessage, DataMessage>(ClientStreamingWithCancellation);
+
+            var channel = CreateChannel();
+
+            var client = TestClientFactory.Create(channel, method);
+
+            // Act
+            var call = client.ClientStreamingCall();
+
+            // Assert
+            await call.RequestStream.WriteAsync(
+                new DataMessage { Data = ByteString.CopyFrom(Encoding.UTF8.GetBytes("Hello world")) },
+                CancellationToken.None).DefaultTimeout();
+
+            await firstMessageTcs.Task.DefaultTimeout();
+
+            var cts = new CancellationTokenSource(TimeSpan.FromSeconds(1));
+            var clientEx = await ExceptionAssert.ThrowsAsync<RpcException>(
+                () => call.RequestStream.WriteAsync(
+                new DataMessage { Data = ByteString.CopyFrom(new byte[1024 * 1024 * 50]) },
+                cts.Token)).DefaultTimeout();
+            Assert.AreEqual(StatusCode.Cancelled, clientEx.StatusCode);
+
+            clientCancellationTcs.SetResult(null);
+
+            Assert.IsTrue(await serverCanceledTcs.Task.DefaultTimeout());
+        }
 #endif
     }
 }

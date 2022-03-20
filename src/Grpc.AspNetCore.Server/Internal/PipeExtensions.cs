@@ -68,7 +68,11 @@ namespace Grpc.AspNetCore.Server.Internal
 
                 if (flush)
                 {
-                    await pipeWriter.FlushAsync();
+                    var flushResult = await pipeWriter.FlushAsync();
+                    if (!flushResult.IsCompleted && serverCallContext.CancellationToken.IsCancellationRequested)
+                    {
+                        throw new OperationCanceledException();
+                    }
                 }
 
                 GrpcServerLog.MessageSent(serverCallContext.Logger);

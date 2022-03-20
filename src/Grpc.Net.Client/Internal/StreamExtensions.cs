@@ -303,7 +303,7 @@ namespace Grpc.Net.Client
 
                 // Sending the header+content in a single WriteAsync call has significant performance benefits
                 // https://github.com/dotnet/runtime/issues/35184#issuecomment-626304981
-                await stream.WriteAsync(serializationContext.GetWrittenPayload(), callOptions.CancellationToken).ConfigureAwait(false);
+                await stream.WriteAsync(serializationContext.GetWrittenPayload(), call.CancellationToken).ConfigureAwait(false);
 
                 GrpcCallLog.MessageSent(call.Logger);
             }
