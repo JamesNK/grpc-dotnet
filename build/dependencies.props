@@ -3,7 +3,7 @@
     <BenchmarkDotNetPackageVersion>0.13.1</BenchmarkDotNetPackageVersion>
     <GoogleApisAuthPackageVersion>1.46.0</GoogleApisAuthPackageVersion>
     <GoogleProtobufPackageVersion>3.19.4</GoogleProtobufPackageVersion>
-    <GrpcDotNetPackageVersion>2.44.0</GrpcDotNetPackageVersion>  <!-- Used by example projects -->
+    <GrpcDotNetPackageVersion>2.47.0-pre1</GrpcDotNetPackageVersion>  <!-- Used by example projects -->
     <GrpcPackageVersion>2.46.3</GrpcPackageVersion>
     <GrpcToolsPackageVersion>2.47.0</GrpcToolsPackageVersion>
     <MicrosoftAspNetCoreAppPackageVersion>6.0.0</MicrosoftAspNetCoreAppPackageVersion>
