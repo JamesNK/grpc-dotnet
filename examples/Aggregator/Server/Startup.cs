@@ -17,8 +17,10 @@
 #endregion
 
 using System;
+using System.Diagnostics;
 using Count;
 using Greet;
+using Grpc.Tests.Shared;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
@@ -32,6 +34,8 @@ namespace Server
 {
     public partial class Startup
     {
+        public static HttpEventSourceListener HttpEventListener = default!;
+
         private readonly IConfiguration _configuration;
         private const string EnableOpenTelemetryKey = "EnableOpenTelemetry";
 
@@ -42,10 +46,15 @@ namespace Server
 
         public void ConfigureServices(IServiceCollection services)
         {
+            //var factory = LoggerFactory.Create(c => c.AddConsole());
+
             services.AddGrpc();
             services.AddSingleton<IncrementingCounter>();
 
-            if (bool.TryParse(_configuration[EnableOpenTelemetryKey], out var enableOpenTelemetry) && enableOpenTelemetry)
+            bool.TryParse(_configuration[EnableOpenTelemetryKey], out var enableOpenTelemetry);
+            Console.WriteLine($"OpenTelemetry enabled: {enableOpenTelemetry}");
+
+            if (enableOpenTelemetry)
             {
                 services.AddOpenTelemetryTracing(telemetry =>
                 {
@@ -80,6 +89,9 @@ namespace Server
 
         public void Configure(IApplicationBuilder app, IWebHostEnvironment env)
         {
+            Debugger.Launch();
+            HttpEventListener = new HttpEventSourceListener(app.ApplicationServices.GetRequiredService<ILoggerFactory>());
+
             if (env.IsDevelopment())
             {
                 app.UseDeveloperExceptionPage();

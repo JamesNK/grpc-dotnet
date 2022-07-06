@@ -33,12 +33,12 @@ namespace Client
 
         static async Task Main(string[] args)
         {
-            using var channel = GrpcChannel.ForAddress("https://localhost:5001");
+            using var channel = GrpcChannel.ForAddress("http://localhost:5000");
             var client = new Aggregator.AggregatorClient(channel);
 
             await ServerStreamingCallExample(client);
 
-            await ClientStreamingCallExample(client);
+            //await ClientStreamingCallExample(client);
 
             Console.WriteLine("Press any key to exit...");
             Console.ReadKey();
