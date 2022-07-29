@@ -67,10 +67,7 @@ namespace Grpc.AspNetCore.Server.Model.Internal
             {
                 foreach (var method in serviceMethodProviderContext.Methods)
                 {
-                    // TODO(JamesNK): Remove once ASP.NET Core fix is available - https://github.com/dotnet/aspnetcore/pull/42519
-#pragma warning disable IL2026 // Members annotated with 'RequiresUnreferencedCodeAttribute' require dynamic access otherwise can break functionality when trimming application code
                     var endpointBuilder = endpointRouteBuilder.Map(method.Pattern, method.RequestDelegate);
-#pragma warning restore IL2026 // Members annotated with 'RequiresUnreferencedCodeAttribute' require dynamic access otherwise can break functionality when trimming application code
 
                     endpointBuilder.Add(ep =>
                     {
@@ -158,10 +155,7 @@ namespace Grpc.AspNetCore.Server.Model.Internal
                 defaults: null,
                 parameterPolicies: new RouteValueDictionary { ["contentType"] = GrpcUnimplementedConstraint.Instance });
 
-            // TODO(JamesNK): Remove once ASP.NET Core fix is available - https://github.com/dotnet/aspnetcore/pull/42519
-#pragma warning disable IL2026 // Members annotated with 'RequiresUnreferencedCodeAttribute' require dynamic access otherwise can break functionality when trimming application code
             var endpointBuilder = endpointRouteBuilder.Map(routePattern, requestDelegate);
-#pragma warning restore IL2026 // Members annotated with 'RequiresUnreferencedCodeAttribute' require dynamic access otherwise can break functionality when trimming application code
 
             endpointBuilder.Add(ep =>
             {
