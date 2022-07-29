@@ -13,7 +13,6 @@
     <ProjectReference Include="..\..\src\Grpc.HealthCheck\Grpc.HealthCheck.csproj" />
     
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="$(MicrosoftAspNetCoreApp31PackageVersion)" />
-    <PackageReference Include="System.Net.Http.Json" Version="$(MicrosoftAspNetCoreAppPackageVersion)" />
 
     <Protobuf Include="..\Proto\any.proto" Link="Protos\any.proto" />
     <Protobuf Include="..\Proto\authorize.proto" Link="Protos\authorize.proto" />
@@ -31,7 +30,20 @@
     <Protobuf Include="..\Proto\issue.proto" Link="Protos\issue.proto" />
     <Protobuf Include="..\Proto\test.proto" Link="Protos\test.proto" />
 
-	<Compile Include="..\..\test\Shared\ActivityReplacer.cs" Link="Infrastructure\ActivityReplacer.cs" />
+	  <Compile Include="..\..\test\Shared\ActivityReplacer.cs" Link="Infrastructure\ActivityReplacer.cs" />
   </ItemGroup>
-  
+
+  <!--<ItemGroup Condition="'$(TargetFramework)'=='netcoreapp3.1'">
+    <PackageReference Include="System.Net.Http.Json" Version="$(MicrosoftAspNetCoreApp31PackageVersion)" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(TargetFramework)'=='net5.0'">
+    <PackageReference Include="System.Net.Http.Json" Version="$(MicrosoftAspNetCoreApp5PackageVersion)" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(TargetFramework)'=='net6.0'">
+    <PackageReference Include="System.Net.Http.Json" Version="$(MicrosoftAspNetCoreApp6PackageVersion)" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(TargetFramework)'=='net7.0'">
+    <PackageReference Include="System.Net.Http.Json" Version="$(MicrosoftAspNetCoreAppPackageVersion)" />
+  </ItemGroup>-->
+
 </Project>
