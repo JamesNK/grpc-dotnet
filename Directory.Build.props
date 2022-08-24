@@ -14,14 +14,10 @@
     <CheckEolTargetFramework>false</CheckEolTargetFramework>
 
     <!-- Don't make missing XML docs a fatal build error, but still surface so we have visibility into undocumented APIs. -->
-    <WarningsNotAsErrors>$(WarningsNotAsErrors);CS1591;CS8981</WarningsNotAsErrors>
-
-    <!-- Ignore warning about lowercase identifiers. Caused by generated source from Protobuf. -->
-    <!-- TODO(JamesNK): Move when Protobuf is updated. -->
-    <NoWarn>$(NoWarn);CS8981</NoWarn>
+    WarningsNotAsErrors>$(WarningsNotAsErrors);CS1591</WarningsNotAsErrors>
 
     <EmbedUntrackedSources>true</EmbedUntrackedSources>
-    <LangVersion>10.0</LangVersion>
+    <LangVersion>11.0</LangVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
