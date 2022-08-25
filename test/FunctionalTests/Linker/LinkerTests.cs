@@ -31,7 +31,7 @@ namespace Grpc.AspNetCore.FunctionalTests.Linker
     [Category("LongRunning")]
     public class LinkerTests
     {
-        private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(60);
+        private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(120);
 
         [Test]
         public async Task RunWebsiteAndCallWithClient_Success()
