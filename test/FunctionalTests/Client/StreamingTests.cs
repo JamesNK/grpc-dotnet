@@ -600,6 +600,11 @@ namespace Grpc.AspNetCore.FunctionalTests.Client
 
                     context.GetHttpContext().Abort();
 
+                    // Abort doesn't happen inline. Wait for token to be triggered.
+                    var tcs = new TaskCompletionSource<object?>(TaskCreationOptions.RunContinuationsAsynchronously);
+                    context.CancellationToken.Register(() => tcs.SetResult(null));
+                    await tcs.Task;
+
                     await responseStream.WriteAsync(new DataMessage());
                 });
                 writeTcs.SetResult(writeTask);
@@ -719,8 +724,8 @@ namespace Grpc.AspNetCore.FunctionalTests.Client
                     return true;
                 }
 
-                if (writeContext.LoggerName == "Grpc.Net.Client.Internal.HttpContentClientStreamWriter" &&
-                    writeContext.Exception is InvalidOperationException)
+                if (writeContext.Exception is InvalidOperationException ex &&
+                    ex.Message == "Can't read messages after the request is complete.")
                 {
                     return true;
                 }
@@ -736,16 +741,29 @@ namespace Grpc.AspNetCore.FunctionalTests.Client
             {
                 var readTask = Task.Run(async () =>
                 {
-                    if (readBeforeExit)
+                    try
                     {
-                        Assert.IsTrue(await requestStream.MoveNext());
+                        if (readBeforeExit)
+                        {
+                            Assert.IsTrue(await requestStream.MoveNext());
+                        }
+
+                        await syncPoint.WaitToContinue();
+
+                        context.GetHttpContext().Abort();
+
+                        // Abort doesn't happen inline. Wait for token to be triggered.
+                        var tcs = new TaskCompletionSource<object?>(TaskCreationOptions.RunContinuationsAsynchronously);
+                        context.CancellationToken.Register(() => tcs.SetResult(null));
+                        await tcs.Task;
+
+                        Assert.IsFalse(await requestStream.MoveNext());
                     }
-
-                    await syncPoint.WaitToContinue();
-
-                    context.GetHttpContext().Abort();
-
-                    Assert.IsFalse(await requestStream.MoveNext());
+                    catch (Exception ex)
+                    {
+                        Logger.LogError(ex, "Server error from reading client stream.");
+                        throw;
+                    }
                 });
                 readTcs.SetResult(readTask);
 
