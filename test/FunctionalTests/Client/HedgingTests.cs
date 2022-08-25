@@ -708,10 +708,7 @@ namespace Grpc.AspNetCore.FunctionalTests.Client
                 }
                 catch (IOException)
                 {
-                    // Abort doesn't happen inline. Wait for token to be triggered.
-                    var tcs = new TaskCompletionSource<object?>(TaskCreationOptions.RunContinuationsAsynchronously);
-                    context.CancellationToken.Register(() => tcs.SetResult(null));
-                    await tcs.Task;
+                    await context.CancellationToken.AwaitCancellation();
 
                     serverCanceledTcs.TrySetResult(context.CancellationToken.IsCancellationRequested);
                     return new DataMessage();
@@ -786,10 +783,7 @@ namespace Grpc.AspNetCore.FunctionalTests.Client
                 {
                     if (IsWriteCanceledException(ex))
                     {
-                        // Abort doesn't happen inline. Wait for token to be triggered.
-                        var tcs = new TaskCompletionSource<object?>(TaskCreationOptions.RunContinuationsAsynchronously);
-                        context.CancellationToken.Register(() => tcs.SetResult(null));
-                        await tcs.Task;
+                        await context.CancellationToken.AwaitCancellation();
 
                         serverCanceledTcs.SetResult(context.CancellationToken.IsCancellationRequested);
                         return new DataMessage();

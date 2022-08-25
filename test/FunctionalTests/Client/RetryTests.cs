@@ -697,10 +697,7 @@ namespace Grpc.AspNetCore.FunctionalTests.Client
                 {
                     if (IsWriteCanceledException(ex))
                     {
-                        // Abort doesn't happen inline. Wait for token to be triggered.
-                        var tcs = new TaskCompletionSource<object?>(TaskCreationOptions.RunContinuationsAsynchronously);
-                        context.CancellationToken.Register(() => tcs.SetResult(null));
-                        await tcs.Task;
+                        await context.CancellationToken.AwaitCancellation();
 
                         Logger.LogInformation("Server got expected cancellation when sending big message.");
                         serverCanceledTcs.SetResult(context.CancellationToken.IsCancellationRequested);
@@ -767,10 +764,7 @@ namespace Grpc.AspNetCore.FunctionalTests.Client
                 {
                     if (ex is InvalidOperationException || ex is IOException)
                     {
-                        // Abort doesn't happen inline. Wait for token to be triggered.
-                        var tcs = new TaskCompletionSource<object?>(TaskCreationOptions.RunContinuationsAsynchronously);
-                        context.CancellationToken.Register(() => tcs.SetResult(null));
-                        await tcs.Task;
+                        await context.CancellationToken.AwaitCancellation();
 
                         serverCanceledTcs.SetResult(context.CancellationToken.IsCancellationRequested);
                         return new DataMessage();

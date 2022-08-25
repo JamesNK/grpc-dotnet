@@ -22,6 +22,14 @@ namespace Grpc.Tests.Shared
 {
     public static class TestHelpers
     {
+        public static Task AwaitCancellation(this CancellationToken cancellationToken)
+        {
+            // Abort doesn't happen inline. Wait for token to be triggered.
+            var tcs = new TaskCompletionSource<object?>(TaskCreationOptions.RunContinuationsAsynchronously);
+            cancellationToken.Register(() => tcs.SetResult(null));
+            return tcs.Task;
+        }
+
         public static string ResolvePath(string relativePath)
         {
             var resolvedPath = Path.Combine(Path.GetDirectoryName(typeof(TestHelpers).Assembly.Location)!, relativePath);
