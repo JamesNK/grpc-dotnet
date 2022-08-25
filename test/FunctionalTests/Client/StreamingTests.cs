@@ -1116,6 +1116,11 @@ namespace Grpc.AspNetCore.FunctionalTests.Client
                 {
                     if (IsWriteCanceledException(ex))
                     {
+                        // Abort doesn't happen inline. Wait for token to be triggered.
+                        var tcs = new TaskCompletionSource<object?>(TaskCreationOptions.RunContinuationsAsynchronously);
+                        context.CancellationToken.Register(() => tcs.SetResult(null));
+                        await tcs.Task;
+
                         Logger.LogInformation("Server got expected cancellation when sending big message.");
                         serverCanceledTcs.SetResult(context.CancellationToken.IsCancellationRequested);
                         return;
@@ -1180,6 +1185,11 @@ namespace Grpc.AspNetCore.FunctionalTests.Client
                 {
                     if (IsWriteCanceledException(ex))
                     {
+                        // Abort doesn't happen inline. Wait for token to be triggered.
+                        var tcs = new TaskCompletionSource<object?>(TaskCreationOptions.RunContinuationsAsynchronously);
+                        context.CancellationToken.Register(() => tcs.SetResult(null));
+                        await tcs.Task;
+
                         Logger.LogInformation("Server read canceled as expeceted.");
                         serverCanceledTcs.SetResult(context.CancellationToken.IsCancellationRequested);
                         return new DataMessage();
@@ -1250,6 +1260,11 @@ namespace Grpc.AspNetCore.FunctionalTests.Client
                 {
                     if (IsWriteCanceledException(ex))
                     {
+                        // Abort doesn't happen inline. Wait for token to be triggered.
+                        var tcs = new TaskCompletionSource<object?>(TaskCreationOptions.RunContinuationsAsynchronously);
+                        context.CancellationToken.Register(() => tcs.SetResult(null));
+                        await tcs.Task;
+
                         Logger.LogInformation("Server read canceled as expeceted.");
                         serverCanceledTcs.SetResult(context.CancellationToken.IsCancellationRequested);
                         return new DataMessage();
