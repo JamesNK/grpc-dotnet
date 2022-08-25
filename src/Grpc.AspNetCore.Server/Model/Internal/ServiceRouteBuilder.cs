@@ -149,7 +149,6 @@ namespace Grpc.AspNetCore.Server.Model.Internal
 
         private static IEndpointConventionBuilder CreateUnimplementedEndpoint(IEndpointRouteBuilder endpointRouteBuilder, string pattern, string displayName, RequestDelegate requestDelegate)
         {
-            // https://github.com/dotnet/aspnetcore/issues/24042
             var routePattern = RoutePatternFactory.Parse(
                 pattern,
                 defaults: null,
