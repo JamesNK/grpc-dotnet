@@ -708,7 +708,7 @@ namespace Grpc.AspNetCore.FunctionalTests.Client
                 }
                 catch (IOException)
                 {
-                    await context.CancellationToken.AwaitCancellation();
+                    await context.CancellationToken.WaitForCancellationAsync();
 
                     serverCanceledTcs.TrySetResult(context.CancellationToken.IsCancellationRequested);
                     return new DataMessage();
@@ -783,7 +783,7 @@ namespace Grpc.AspNetCore.FunctionalTests.Client
                 {
                     if (IsWriteCanceledException(ex))
                     {
-                        await context.CancellationToken.AwaitCancellation();
+                        await context.CancellationToken.WaitForCancellationAsync();
 
                         serverCanceledTcs.SetResult(context.CancellationToken.IsCancellationRequested);
                         return new DataMessage();

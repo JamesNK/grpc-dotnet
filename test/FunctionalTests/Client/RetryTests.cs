@@ -697,7 +697,7 @@ namespace Grpc.AspNetCore.FunctionalTests.Client
                 {
                     if (IsWriteCanceledException(ex))
                     {
-                        await context.CancellationToken.AwaitCancellation();
+                        await context.CancellationToken.WaitForCancellationAsync();
 
                         Logger.LogInformation("Server got expected cancellation when sending big message.");
                         serverCanceledTcs.SetResult(context.CancellationToken.IsCancellationRequested);
@@ -764,7 +764,7 @@ namespace Grpc.AspNetCore.FunctionalTests.Client
                 {
                     if (ex is InvalidOperationException || ex is IOException)
                     {
-                        await context.CancellationToken.AwaitCancellation();
+                        await context.CancellationToken.WaitForCancellationAsync();
 
                         serverCanceledTcs.SetResult(context.CancellationToken.IsCancellationRequested);
                         return new DataMessage();

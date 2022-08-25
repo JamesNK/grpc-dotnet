@@ -22,7 +22,7 @@ namespace Grpc.Tests.Shared
 {
     public static class TestHelpers
     {
-        public static Task AwaitCancellation(this CancellationToken cancellationToken)
+        public static Task WaitForCancellationAsync(this CancellationToken cancellationToken)
         {
             // Abort doesn't happen inline. Wait for token to be triggered.
             var tcs = new TaskCompletionSource<object?>(TaskCreationOptions.RunContinuationsAsynchronously);

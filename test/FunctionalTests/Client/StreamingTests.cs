@@ -600,7 +600,7 @@ namespace Grpc.AspNetCore.FunctionalTests.Client
 
                     context.GetHttpContext().Abort();
 
-                    await context.CancellationToken.AwaitCancellation();
+                    await context.CancellationToken.WaitForCancellationAsync();
 
                     await responseStream.WriteAsync(new DataMessage());
                 });
@@ -749,7 +749,7 @@ namespace Grpc.AspNetCore.FunctionalTests.Client
 
                         context.GetHttpContext().Abort();
 
-                        await context.CancellationToken.AwaitCancellation();
+                        await context.CancellationToken.WaitForCancellationAsync();
 
                         Assert.IsFalse(await requestStream.MoveNext());
                     }
@@ -1045,7 +1045,7 @@ namespace Grpc.AspNetCore.FunctionalTests.Client
                 }
                 catch (OperationCanceledException)
                 {
-                    await context.CancellationToken.AwaitCancellation();
+                    await context.CancellationToken.WaitForCancellationAsync();
 
                     serverCanceledTcs.SetResult(context.CancellationToken.IsCancellationRequested);
                     throw;
@@ -1107,7 +1107,7 @@ namespace Grpc.AspNetCore.FunctionalTests.Client
                 {
                     if (IsWriteCanceledException(ex))
                     {
-                        await context.CancellationToken.AwaitCancellation();
+                        await context.CancellationToken.WaitForCancellationAsync();
 
                         Logger.LogInformation("Server got expected cancellation when sending big message.");
                         serverCanceledTcs.SetResult(context.CancellationToken.IsCancellationRequested);
@@ -1173,7 +1173,7 @@ namespace Grpc.AspNetCore.FunctionalTests.Client
                 {
                     if (IsWriteCanceledException(ex))
                     {
-                        await context.CancellationToken.AwaitCancellation();
+                        await context.CancellationToken.WaitForCancellationAsync();
 
                         Logger.LogInformation("Server read canceled as expeceted.");
                         serverCanceledTcs.SetResult(context.CancellationToken.IsCancellationRequested);
@@ -1245,7 +1245,7 @@ namespace Grpc.AspNetCore.FunctionalTests.Client
                 {
                     if (IsWriteCanceledException(ex))
                     {
-                        await context.CancellationToken.AwaitCancellation();
+                        await context.CancellationToken.WaitForCancellationAsync();
 
                         Logger.LogInformation("Server read canceled as expeceted.");
                         serverCanceledTcs.SetResult(context.CancellationToken.IsCancellationRequested);
