@@ -1051,6 +1051,11 @@ namespace Grpc.AspNetCore.FunctionalTests.Client
                 }
                 catch (OperationCanceledException)
                 {
+                    // Abort doesn't happen inline. Wait for token to be triggered.
+                    var tcs = new TaskCompletionSource<object?>(TaskCreationOptions.RunContinuationsAsynchronously);
+                    context.CancellationToken.Register(() => tcs.SetResult(null));
+                    await tcs.Task;
+
                     serverCanceledTcs.SetResult(context.CancellationToken.IsCancellationRequested);
                     throw;
                 }
@@ -1073,7 +1078,7 @@ namespace Grpc.AspNetCore.FunctionalTests.Client
             var clientEx = await ExceptionAssert.ThrowsAsync<RpcException>(() => call.ResponseStream.MoveNext()).DefaultTimeout();
             Assert.AreEqual(StatusCode.Cancelled, clientEx.StatusCode);
 
-            Assert.IsTrue(await serverCanceledTcs.Task.DefaultTimeout());
+            Assert.IsTrue(await serverCanceledTcs.Task.DefaultTimeout(), "Check to see whether cancellation token is triggered on the server.");
         }
 
         [Test]
