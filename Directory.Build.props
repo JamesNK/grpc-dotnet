@@ -18,7 +18,7 @@
     <WarningsNotAsErrors>$(WarningsNotAsErrors);CS1591</WarningsNotAsErrors>
 
     <!-- Ignore warning about lowercase identifiers. Caused by generated source from Protobuf. -->
-    <!-- TODO(JamesNK): Remove when Protobuf is updated and samples use a version of Grpc.AspNetCore that brings in Grpc.Tools. -->
+    <!-- TODO(JamesNK): Remove when Protobuf is updated and samples use a version of Grpc.AspNetCore that brings in Grpc.Tools 2.49.0 or later. -->
     <NoWarn>$(NoWarn);CS8981</NoWarn>
 
     <EmbedUntrackedSources>true</EmbedUntrackedSources>
