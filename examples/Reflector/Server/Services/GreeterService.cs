@@ -16,6 +16,7 @@
 
 #endregion
 
+using System.ComponentModel.DataAnnotations;
 using System.Threading.Tasks;
 using Greet;
 using Grpc.Core;
@@ -34,8 +35,7 @@ namespace Server
 
         public override Task<HelloReply> SayHello(HelloRequest request, ServerCallContext context)
         {
-            _logger.LogInformation($"Sending hello to {request.Name}");
-            return Task.FromResult(new HelloReply { Message = "Hello " + request.Name });
+            throw new ValidationException(new ValidationResult("Validation failed"), validatingAttribute: null, value: null);
         }
 
         public override async Task SayHellos(HelloRequest request, IServerStreamWriter<HelloReply> responseStream, ServerCallContext context)
