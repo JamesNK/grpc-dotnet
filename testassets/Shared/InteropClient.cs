@@ -25,6 +25,7 @@ using Grpc.Testing;
 using Microsoft.Extensions.Logging;
 using Empty = Grpc.Testing.Empty;
 using System.Security.Authentication;
+using System.Net.Security;
 
 #if !BLAZOR_WASM
 using Google.Apis.Auth.OAuth2;
@@ -51,6 +52,7 @@ public class ClientOptions
     public string? GrpcWebMode { get; set; }
     public bool UseWinHttp { get; set; }
     public bool UseHttp3 { get; set; }
+    public string? PipeName { get; set; }
 }
 
 public class InteropClient
@@ -174,25 +176,47 @@ public class InteropClient
 #pragma warning restore CA1416 // Validate platform compatibility
     }
 
-    private HttpClientHandler CreateHttpClientHandler()
+    private HttpMessageHandler CreateHttpClientHandler()
     {
-        var httpClientHandler = new HttpClientHandler();
-#if !BLAZOR_WASM
-        httpClientHandler.ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator;
-
+#if BLAZOR_WASM
+        return new HttpClientHandler();
+#elif NET5_0_OR_GREATER
+        var handler = new SocketsHttpHandler();
+        handler.SslOptions = new SslClientAuthenticationOptions();
+        handler.SslOptions.RemoteCertificateValidationCallback = (_, __, ___, ____) => true;
         if (options.UseTestCa)
         {
-            var pem = File.ReadAllText("Certs/ca.pem");
-            var certData = GetBytesFromPem(pem, "CERTIFICATE");
-            var cert = new X509Certificate2(certData!);
-
-            httpClientHandler.ClientCertificates.Add(cert);
+            handler.SslOptions.ClientCertificates = new X509CertificateCollection
+            {
+                CreateTestClientCert()
+            };
         }
+        if (!string.IsNullOrEmpty(options.PipeName))
+        {
+            var namedPipesConnectionFactory = new InteropTestsClient.NamedPipesConnectionFactory(options.PipeName);
+            handler.ConnectCallback = namedPipesConnectionFactory.ConnectAsync;
+        }
+        return handler;
+#else
+        var handler = new HttpClientHandler();
+        handler.ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator;
+        if (options.UseTestCa)
+        {
+            handler.ClientCertificates.Add(CreateTestClientCert());
+        }
+        return handler;
 #endif
-        return httpClientHandler;
     }
 
 #if !BLAZOR_WASM
+    private static X509Certificate2 CreateTestClientCert()
+    {
+        var pem = File.ReadAllText("Certs/ca.pem");
+        var certData = GetBytesFromPem(pem, "CERTIFICATE");
+        var cert = new X509Certificate2(certData!);
+        return cert;
+    }
+
     private async Task<IChannelWrapper> CoreCreateChannel()
     {
         var credentials = await CreateCredentialsAsync();
@@ -880,7 +904,7 @@ public class InteropClient
     // TODO(JamesNK): PEM loading logic from https://stackoverflow.com/a/10498045/11829
     // .NET does not have a built-in API for loading pem files
     // Consider providing ca file in a different format and removing method
-    private byte[]? GetBytesFromPem(string pemString, string section)
+    private static byte[]? GetBytesFromPem(string pemString, string section)
     {
         var header = $"-----BEGIN {section}-----";
         var footer = $"-----END {section}-----";

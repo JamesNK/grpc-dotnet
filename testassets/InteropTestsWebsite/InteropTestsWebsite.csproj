@@ -21,6 +21,8 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
 
+    <PackageReference Include="Microsoft.AspNetCore.Server.Kestrel.Transport.NamedPipes" Version="0.3.6" />
+
     <ProjectReference Include="..\..\src\Grpc.AspNetCore\Grpc.AspNetCore.csproj" />
     <ProjectReference Include="..\..\src\Grpc.AspNetCore.Web\Grpc.AspNetCore.Web.csproj" />
   </ItemGroup>

@@ -16,7 +16,10 @@
 
 #endregion
 
+using Microsoft.AspNetCore.Connections;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
+using Microsoft.AspNetCore.Server.Kestrel.Transport.NamedPipes;
+using Microsoft.AspNetCore.Server.Kestrel.Transport.NamedPipes.Internal;
 
 namespace InteropTestsWebsite;
 
@@ -31,8 +34,14 @@ public class Program
 
     public static IHostBuilder CreateHostBuilder(string[] args) =>
         Host.CreateDefaultBuilder(args)
-            .ConfigureServices(services =>
+            .ConfigureServices((context, services) =>
             {
+                var pipeName = context.Configuration.GetValue<string>("pipe_name");
+                if (!string.IsNullOrEmpty(pipeName))
+                {
+                    services.AddSingleton<IConnectionListenerFactory, NamedPipeTransportFactory>();
+                }
+
                 services.AddLogging(builder => builder.SetMinimumLevel(MinimumLogLevel));
             })
             .ConfigureWebHostDefaults(webBuilder =>
@@ -45,9 +54,13 @@ public class Program
                     var http1Port = context.Configuration.GetValue<int>("port_http1", -1);
                     var http3Port = context.Configuration.GetValue<int>("port_http3", -1);
                     var useTls = context.Configuration.GetValue<bool>("use_tls", false);
+                    var pipeName = context.Configuration.GetValue<string>("pipe_name");
 
                     options.Limits.MinRequestBodyDataRate = null;
-                    options.ListenAnyIP(http2Port, o => ConfigureEndpoint(o, useTls, HttpProtocols.Http2));
+                    if (http2Port != -1)
+                    {
+                        options.ListenAnyIP(http2Port, o => ConfigureEndpoint(o, useTls, HttpProtocols.Http2));
+                    }
                     if (http1Port != -1)
                     {
                         options.ListenAnyIP(http1Port, o => ConfigureEndpoint(o, useTls, HttpProtocols.Http1));
@@ -57,6 +70,10 @@ public class Program
 #pragma warning disable CA2252 // This API requires opting into preview features
                         options.ListenAnyIP(http3Port, o => ConfigureEndpoint(o, useTls, HttpProtocols.Http3));
 #pragma warning restore CA2252 // This API requires opting into preview features
+                    }
+                    if (!string.IsNullOrEmpty(pipeName))
+                    {
+                        options.Listen(new NamedPipeEndPoint(pipeName), o => ConfigureEndpoint(o, useTls, HttpProtocols.Http2));
                     }
 
                     void ConfigureEndpoint(ListenOptions listenOptions, bool useTls, HttpProtocols httpProtocols)

@@ -21,7 +21,9 @@ using System.CommandLine.Binding;
 using System.CommandLine.Invocation;
 using System.Diagnostics;
 using System.Globalization;
+using System.IO.Pipes;
 using System.Reflection;
+using System.Security.Principal;
 using Grpc.Shared.TestAssets;
 using Grpc.Tests.Shared;
 using Microsoft.Extensions.DependencyInjection;
@@ -47,6 +49,7 @@ public class Program
         options.Add(new Option<string>(new string[] { "--grpc_web_mode" }) { Name = nameof(ClientOptions.GrpcWebMode) });
         options.Add(new Option<bool>(new string[] { "--use_winhttp" }) { Name = nameof(ClientOptions.UseWinHttp) });
         options.Add(new Option<bool>(new string[] { "--use_http3" }) { Name = nameof(ClientOptions.UseHttp3) });
+        options.Add(new Option<string>(new string[] { "--pipe_name" }) { Name = nameof(ClientOptions.PipeName) });
 
         var rootCommand = new RootCommand();
         foreach (var option in options)
