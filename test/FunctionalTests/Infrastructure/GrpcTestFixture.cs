@@ -137,18 +137,18 @@ public class GrpcTestFixture<TStartup> : IDisposable where TStartup : class
     public HttpMessageHandler Handler { get; }
     public HttpClient Client { get; }
 
-        public HttpClient CreateClient(TestServerEndpointName? endpointName = null, DelegatingHandler? messageHandler = null, Action<SocketsHttpHandler>? configureHandler = null)
+    public HttpClient CreateClient(TestServerEndpointName? endpointName = null, DelegatingHandler? messageHandler = null, Action<SocketsHttpHandler>? configureHandler = null)
     {
-            return CreateHttpCore(endpointName, messageHandler, configureHandler).client;
+        return CreateHttpCore(endpointName, messageHandler, configureHandler).client;
     }
 
-        public (HttpMessageHandler handler, Uri address) CreateHandler(TestServerEndpointName? endpointName = null, DelegatingHandler? messageHandler = null, Action<SocketsHttpHandler>? configureHandler = null)
+    public (HttpMessageHandler handler, Uri address) CreateHandler(TestServerEndpointName? endpointName = null, DelegatingHandler? messageHandler = null, Action<SocketsHttpHandler>? configureHandler = null)
     {
-            var result = CreateHttpCore(endpointName, messageHandler, configureHandler);
+        var result = CreateHttpCore(endpointName, messageHandler, configureHandler);
         return (result.handler, result.client.BaseAddress!);
     }
 
-        private (HttpClient client, HttpMessageHandler handler) CreateHttpCore(TestServerEndpointName? endpointName = null, DelegatingHandler? messageHandler = null, Action<SocketsHttpHandler>? configureHandler = null)
+    private (HttpClient client, HttpMessageHandler handler) CreateHttpCore(TestServerEndpointName? endpointName = null, DelegatingHandler? messageHandler = null, Action<SocketsHttpHandler>? configureHandler = null)
     {
 #if HTTP3_TESTING
         endpointName ??= TestServerEndpointName.Http3WithTls;
@@ -162,7 +162,7 @@ public class GrpcTestFixture<TStartup> : IDisposable where TStartup : class
             RemoteCertificateValidationCallback = (_, __, ___, ____) => true
         };
 
-            configureHandler?.Invoke(socketsHttpHandler);
+        configureHandler?.Invoke(socketsHttpHandler);
 
 #if NET5_0_OR_GREATER
         if (endpointName == TestServerEndpointName.UnixDomainSocket)
