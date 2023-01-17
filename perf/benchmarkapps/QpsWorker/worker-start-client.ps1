@@ -15,7 +15,7 @@ $setup = @"
       "clientType": "ASYNC_CLIENT",
       "securityParams": {},
       "clientChannels": 20,
-      "rpcType": "UNARY",
+      "rpcType": "STREAMING",
       "outstandingRpcsPerChannel": 50,
       "histogramParams": {
         "resolution": 0.01,
@@ -26,8 +26,8 @@ $setup = @"
       },
       "payloadConfig": {
         "simpleParams": {
-          "reqSize": 50,
-          "respSize": 50
+          "reqSize": 1048576,
+          "respSize": 1048576
         }
       }
     }
