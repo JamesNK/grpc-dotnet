@@ -1,4 +1,4 @@
-﻿#region Copyright notice and license
+#region Copyright notice and license
 
 // Copyright 2019 The gRPC Authors
 //
@@ -60,10 +60,7 @@ public static class GrpcClientServiceExtensions
         TClient>(this IServiceCollection services)
         where TClient : class
     {
-        if (services == null)
-        {
-            throw new ArgumentNullException(nameof(services));
-        }
+        ArgumentNullThrowHelper.ThrowIfNull(services);
 
         var name = TypeNameHelper.GetTypeDisplayName(typeof(TClient), fullName: false);
 
@@ -173,15 +170,8 @@ public static class GrpcClientServiceExtensions
         TClient>(this IServiceCollection services, string name)
         where TClient : class
     {
-        if (services == null)
-        {
-            throw new ArgumentNullException(nameof(services));
-        }
-
-        if (name == null)
-        {
-            throw new ArgumentNullException(nameof(name));
-        }
+        ArgumentNullThrowHelper.ThrowIfNull(services);
+        ArgumentNullThrowHelper.ThrowIfNull(name);
 
         return services.AddGrpcClientCore<TClient>(name);
     }
@@ -216,20 +206,9 @@ public static class GrpcClientServiceExtensions
         TClient>(this IServiceCollection services, string name, Action<GrpcClientFactoryOptions> configureClient)
         where TClient : class
     {
-        if (services == null)
-        {
-            throw new ArgumentNullException(nameof(services));
-        }
-
-        if (name == null)
-        {
-            throw new ArgumentNullException(nameof(name));
-        }
-
-        if (configureClient == null)
-        {
-            throw new ArgumentNullException(nameof(configureClient));
-        }
+        ArgumentNullThrowHelper.ThrowIfNull(services);
+        ArgumentNullThrowHelper.ThrowIfNull(name);
+        ArgumentNullThrowHelper.ThrowIfNull(configureClient);
 
         services.Configure(name, configureClient);
 
@@ -270,20 +249,9 @@ public static class GrpcClientServiceExtensions
         TClient>(this IServiceCollection services, string name, Action<IServiceProvider, GrpcClientFactoryOptions> configureClient)
         where TClient : class
     {
-        if (services == null)
-        {
-            throw new ArgumentNullException(nameof(services));
-        }
-
-        if (name == null)
-        {
-            throw new ArgumentNullException(nameof(name));
-        }
-
-        if (configureClient == null)
-        {
-            throw new ArgumentNullException(nameof(configureClient));
-        }
+        ArgumentNullThrowHelper.ThrowIfNull(services);
+        ArgumentNullThrowHelper.ThrowIfNull(name);
+        ArgumentNullThrowHelper.ThrowIfNull(configureClient);
 
         services.AddTransient<IConfigureOptions<GrpcClientFactoryOptions>>(services =>
         {
@@ -311,10 +279,7 @@ public static class GrpcClientServiceExtensions
 #endif
         TClient>(this IServiceCollection services, string name) where TClient : class
     {
-        if (name == null)
-        {
-            throw new ArgumentNullException(nameof(name));
-        }
+        ArgumentNullThrowHelper.ThrowIfNull(name);
 
         // Transient so that IServiceProvider injected into constructor is for the current scope.
         services.TryAddTransient<GrpcClientFactory, DefaultGrpcClientFactory>();
@@ -341,10 +306,7 @@ public static class GrpcClientServiceExtensions
         TClient>(this IServiceCollection services, string name)
         where TClient : class
     {
-        if (services == null)
-        {
-            throw new ArgumentNullException(nameof(services));
-        }
+        ArgumentNullThrowHelper.ThrowIfNull(services);
 
         services
             .AddHttpClient(name)

@@ -1,4 +1,4 @@
-﻿#region Copyright notice and license
+#region Copyright notice and license
 
 // Copyright 2019 The gRPC Authors
 //
@@ -88,10 +88,7 @@ internal class HttpContentClientStreamWriter<TRequest, TResponse> : ClientStream
 
     public override async Task WriteCoreAsync(TRequest message, CancellationToken cancellationToken)
     {
-        if (message == null)
-        {
-            throw new ArgumentNullException(nameof(message));
-        }
+        ArgumentNullThrowHelper.ThrowIfNull(message);
 
         _call.TryRegisterCancellation(cancellationToken, out var ctsRegistration);
 

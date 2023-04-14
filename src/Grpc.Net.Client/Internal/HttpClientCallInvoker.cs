@@ -1,4 +1,4 @@
-﻿#region Copyright notice and license
+#region Copyright notice and license
 
 // Copyright 2019 The gRPC Authors
 //
@@ -18,6 +18,7 @@
 
 using Grpc.Core;
 using Grpc.Net.Client.Internal.Retry;
+using Grpc.Shared;
 
 namespace Grpc.Net.Client.Internal;
 
@@ -150,10 +151,7 @@ internal sealed class HttpClientCallInvoker : CallInvoker
         where TRequest : class
         where TResponse : class
     {
-        if (channel.Disposed)
-        {
-            throw new ObjectDisposedException(nameof(GrpcChannel));
-        }
+        ObjectDisposedThrowHelper.ThrowIf(channel.Disposed, typeof(GrpcChannel));
 
         var methodInfo = channel.GetCachedGrpcMethodInfo(method);
         var call = new GrpcCall<TRequest, TResponse>(method, methodInfo, options, channel, attempt);

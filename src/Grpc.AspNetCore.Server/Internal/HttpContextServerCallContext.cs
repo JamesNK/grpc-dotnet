@@ -291,10 +291,7 @@ internal sealed partial class HttpContextServerCallContext : ServerCallContext, 
 
     private void LogCallEnd()
     {
-        if (_activity != null)
-        {
-            _activity.AddTag(GrpcServerConstants.ActivityStatusCodeTag, _status.StatusCode.ToTrailerString());
-        }
+        _activity?.AddTag(GrpcServerConstants.ActivityStatusCodeTag, _status.StatusCode.ToTrailerString());
         if (_status.StatusCode != StatusCode.OK)
         {
             if (GrpcEventSource.Log.IsEnabled())
@@ -344,10 +341,7 @@ internal sealed partial class HttpContextServerCallContext : ServerCallContext, 
 
     protected override Task WriteResponseHeadersAsyncCore(Metadata responseHeaders)
     {
-        if (responseHeaders == null)
-        {
-            throw new ArgumentNullException(nameof(responseHeaders));
-        }
+        ArgumentNullThrowHelper.ThrowIfNull(responseHeaders);
 
         // Headers can only be written once. Throw on subsequent call to write response header instead of silent no-op.
         if (HttpContext.Response.HasStarted)
@@ -387,10 +381,7 @@ internal sealed partial class HttpContextServerCallContext : ServerCallContext, 
     public void Initialize(ISystemClock? clock = null)
     {
         _activity = GetHostActivity();
-        if (_activity != null)
-        {
-            _activity.AddTag(GrpcServerConstants.ActivityMethodTag, MethodCore);
-        }
+        _activity?.AddTag(GrpcServerConstants.ActivityMethodTag, MethodCore);
 
         if (GrpcEventSource.Log.IsEnabled())
         {
