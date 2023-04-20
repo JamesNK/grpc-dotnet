@@ -191,11 +191,11 @@ public class CallHandlerTests
         Assert.AreEqual(expectedTimeoutDisabled, timeoutFeature.TimeoutDisabled);
     }
 
-    [TestCase(MethodType.Unary, false)]
-    [TestCase(MethodType.ClientStreaming, false)]
-    [TestCase(MethodType.ServerStreaming, false)]
-    [TestCase(MethodType.DuplexStreaming, false)]
-    public async Task RequestTimeoutFeature_EndpointMetadata_DisableWhenStreaming(MethodType methodType, bool expectedTimeoutDisabled)
+    [TestCase(MethodType.Unary)]
+    [TestCase(MethodType.ClientStreaming)]
+    [TestCase(MethodType.ServerStreaming)]
+    [TestCase(MethodType.DuplexStreaming)]
+    public async Task RequestTimeoutFeature_WithEndpointMetadata_NotDisabledWhenStreaming(MethodType methodType)
     {
         // Arrange
         var timeoutFeature = new TestHttpRequestTimeoutFeature();
@@ -208,7 +208,7 @@ public class CallHandlerTests
         await call.HandleCallAsync(httpContext).DefaultTimeout();
 
         // Assert
-        Assert.AreEqual(expectedTimeoutDisabled, timeoutFeature.TimeoutDisabled);
+        Assert.False(timeoutFeature.TimeoutDisabled);
     }
 
     private sealed class TestHttpRequestTimeoutFeature : IHttpRequestTimeoutFeature
