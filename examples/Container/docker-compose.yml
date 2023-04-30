@@ -4,13 +4,13 @@ services:
     build:
       context: ./../../
       dockerfile: ./examples/Container/Frontend/Dockerfile
-    image: grpc-dotnet/container-frontend
+    image: grpc-dotnet/container-frontend:1.0
     ports:
       - "8080:80"
   container-backend:
     build:
       context: ./../../
       dockerfile: ./examples/Container/Backend/Dockerfile
-    image: grpc-dotnet/container-backend
+    image: grpc-dotnet/container-backend:1.0
     ports:
       - "8081:80"

@@ -17,8 +17,7 @@ spec:
     spec:
       containers:
         - name: backend
-          image: docker.io/grpc-dotnet/container-backend:latest
-          imagePullPolicy: Never
+          image: jamesnkregistry.azurecr.io/grpc-dotnet/container-backend:1.0
           resources:
             limits:
               cpu: "1"

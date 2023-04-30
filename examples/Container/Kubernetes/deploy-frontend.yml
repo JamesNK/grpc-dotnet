@@ -17,8 +17,7 @@ spec:
     spec:
       containers:
         - name: frontend
-          image: docker.io/grpc-dotnet/container-frontend:latest
-          imagePullPolicy: Never
+          image: jamesnkregistry.azurecr.io/grpc-dotnet/container-frontend:1.0
           resources:
             limits:
               cpu: "1"
@@ -40,11 +39,8 @@ metadata:
     app: grpc-dotnet-container
     service: frontend
 spec:
-  type: NodePort
+  type: LoadBalancer
   ports:
-    - port: 3200
-      targetPort: 80
-      protocol: TCP
-      nodePort: 30008
+  - port: 80
   selector:
     service: frontend
