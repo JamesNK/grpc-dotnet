@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
         - name: frontend
-          image: jamesnkregistry.azurecr.io/grpc-dotnet/container-frontend:1.0
+          image: jamesnkregistry.azurecr.io/grpc-dotnet/container-frontend:1.1
           resources:
             limits:
               cpu: "1"
