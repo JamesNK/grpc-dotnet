@@ -1,0 +1,8 @@
+global:
+  scrape_interval: 30s 
+
+scrape_configs:
+- job_name: "dotnet"
+  honor_labels: true
+  static_configs:
+    - targets: ["frontend.default.svc.cluster.local:80"]
