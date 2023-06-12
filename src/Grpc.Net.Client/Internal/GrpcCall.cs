@@ -559,7 +559,22 @@ internal sealed partial class GrpcCall<TRequest, TResponse> : GrpcCall, IGrpcCal
                     // Unary and client streaming calls immediately use the stream to read the response message.
                     // Server streaming and bidirectional streaming calls don't immediately use the stream but it should be accessed
                     // so that there is a way for the client to receive a notification of a possible server abort.
-                    var responseStream = await HttpResponse.Content.ReadAsStreamAsync().ConfigureAwait(false);
+                    Stream responseStream;
+                    try
+                    {
+#if NET5_0_OR_GREATER
+                        responseStream = await HttpResponse.Content.ReadAsStreamAsync(_callCts.Token).ConfigureAwait(false);
+#else
+                        responseStream = await HttpResponse.Content.ReadAsStreamAsync().ConfigureAwait(false);
+#endif
+                    }
+                    catch (Exception ex) when (ex is ObjectDisposedException || (ex is HttpRequestException && ex.InnerException is ObjectDisposedException))
+                    {
+                        // The response was disposed while waiting for the content stream to start.
+                        // This will happen if there is no content stream (e.g. a streaming call finishes with no messages).
+                        // Treat this like a cancellation.
+                        throw new OperationCanceledException();
+                    }
 
                     if (_responseTcs != null)
                     {

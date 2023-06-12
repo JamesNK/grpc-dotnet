@@ -39,7 +39,7 @@ public class FunctionalTestBase
 
     protected GrpcChannel Channel => _channel ??= CreateChannel();
 
-    protected GrpcChannel CreateChannel(bool useHandler = false, ServiceConfig? serviceConfig = null,
+    protected GrpcChannel CreateChannel(bool useHandler = true, ServiceConfig? serviceConfig = null,
         int? maxRetryAttempts = null, long? maxRetryBufferSize = null, long? maxRetryBufferPerCallSize = null,
         int? maxReceiveMessageSize = null, bool? throwOperationCanceledOnCancellation = null)
     {

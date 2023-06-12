@@ -1,4 +1,4 @@
-﻿#region Copyright notice and license
+#region Copyright notice and license
 
 // Copyright 2019 The gRPC Authors
 //
@@ -200,9 +200,10 @@ public class HttpContentClientStreamReaderTests
     public async Task MoveNext_StreamThrowsIOException_ThrowErrorUnavailable()
     {
         // Arrange
+        var readTcs = new TaskCompletionSource<int>();
         var handler = TestHttpMessageHandler.Create(request =>
         {
-            var stream = new TestStream();
+            var stream = new TestStream(() => readTcs.Task);
             var content = new StreamContent(stream);
             return Task.FromResult(ResponseUtils.CreateResponse(HttpStatusCode.OK, content));
         });
@@ -214,8 +215,13 @@ public class HttpContentClientStreamReaderTests
         var call = CreateGrpcCall(channel);
         call.StartServerStreaming(new HelloRequest());
 
+        var moveNextTask = call.ClientStreamReader!.MoveNext(CancellationToken.None);
+
+        //readTcs.TrySetResult(0);
+        readTcs.TrySetException(new IOException("Test"));
+
         // Act
-        var ex = await ExceptionAssert.ThrowsAsync<RpcException>(() => call.ClientStreamReader!.MoveNext(CancellationToken.None)).DefaultTimeout();
+        var ex = await ExceptionAssert.ThrowsAsync<RpcException>(() => moveNextTask).DefaultTimeout();
 
         // Assert
         Assert.AreEqual(StatusCode.Unavailable, ex.StatusCode);
@@ -260,11 +266,18 @@ public class HttpContentClientStreamReaderTests
 
     private class TestStream : Stream
     {
+        private readonly Func<Task<int>> _onReadAsync;
+
         public override bool CanRead => true;
         public override bool CanSeek { get; }
         public override bool CanWrite { get; }
         public override long Length { get; }
         public override long Position { get; set; }
+
+        public TestStream(Func<Task<int>> onReadAsync)
+        {
+            _onReadAsync = onReadAsync;
+        }
 
         public override void Flush()
         {
@@ -292,14 +305,16 @@ public class HttpContentClientStreamReaderTests
         }
 
 #if !NET472
-        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
         {
-            return new ValueTask<int>(Task.FromException<int>(new IOException("Test")));
+            return await _onReadAsync();
+            //return new ValueTask<int>(Task.FromException<int>(new IOException("Test")));
         }
 #else
         public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
         {
-            return Task.FromException<int>(new IOException("Test"));
+            return _onReadAsync();
+            //return Task.FromException<int>(new IOException("Test"));
         }
 #endif
     }

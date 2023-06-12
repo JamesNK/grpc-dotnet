@@ -1,4 +1,4 @@
-﻿#region Copyright notice and license
+#region Copyright notice and license
 
 // Copyright 2019 The gRPC Authors
 //
@@ -16,12 +16,14 @@
 
 #endregion
 
+using System.Diagnostics;
 using System.Net;
 using Grpc.AspNetCore.FunctionalTests.Infrastructure;
 using Grpc.Core;
 using Grpc.Net.Client;
 using Grpc.Tests.Shared;
 using Microsoft.AspNetCore.Http.Features;
+using Microsoft.Extensions.Logging;
 using NUnit.Framework;
 using Streaming;
 
@@ -175,7 +177,7 @@ public class DeadlineTests : FunctionalTestBase
         var channel = GrpcChannel.ForAddress(http.address, new GrpcChannelOptions
         {
             LoggerFactory = LoggerFactory,
-            HttpHandler = new PauseHttpHandler { InnerHandler = http.handler }
+            HttpHandler = new PauseHttpHandler(LoggerFactory) { InnerHandler = http.handler }
         });
 
         var client = TestClientFactory.Create(channel, method);
@@ -191,13 +193,22 @@ public class DeadlineTests : FunctionalTestBase
 
     private class PauseHttpHandler : DelegatingHandler
     {
+        private readonly ILogger _logger;
+
+        public PauseHttpHandler(ILoggerFactory loggerFactory)
+        {
+            _logger = loggerFactory.CreateLogger<PauseHttpHandler>();
+        }
+
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
+            _logger.LogInformation("Starting SendAsync");
             var response = await base.SendAsync(request, cancellationToken);
+            _logger.LogInformation("Received response");
 
-            var newHttpContent = new PauseHttpContent(response.Content);
+            _logger.LogInformation("Wrapping content");
+            var newHttpContent = new PauseHttpContent(response.Content, _logger);
             newHttpContent.Headers.ContentType = response.Content.Headers.ContentType;
-
             response.Content = newHttpContent;
 
             return response;
@@ -206,25 +217,49 @@ public class DeadlineTests : FunctionalTestBase
         private class PauseHttpContent : HttpContent
         {
             private readonly HttpContent _inner;
+            private readonly ILogger _logger;
             private Stream? _innerStream;
 
-            public PauseHttpContent(HttpContent inner)
+            public PauseHttpContent(HttpContent inner, ILogger logger)
             {
                 _inner = inner;
+                _logger = logger;
             }
 
             protected override async Task<Stream> CreateContentReadStreamAsync()
             {
+                _logger.LogInformation(nameof(CreateContentReadStreamAsync));
                 var stream = await _inner.ReadAsStreamAsync().ConfigureAwait(false);
 
-                return new PauseStream(stream);
+                return new PauseStream(stream, _logger);
             }
+
+#if NET5_0_OR_GREATER
+            protected override async Task<Stream> CreateContentReadStreamAsync(CancellationToken cancellationToken)
+            {
+                _logger.LogInformation(nameof(CreateContentReadStreamAsync));
+                var stream = await _inner.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+
+                return new PauseStream(stream, _logger);
+            }
+
+            protected override async Task SerializeToStreamAsync(Stream stream, TransportContext? context, CancellationToken cancellationToken)
+            {
+                _logger.LogInformation(nameof(SerializeToStreamAsync));
+                _innerStream = await _inner.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+
+                _innerStream = new PauseStream(_innerStream, _logger);
+
+                await _innerStream.CopyToAsync(stream, cancellationToken).ConfigureAwait(false);
+            }
+#endif
 
             protected override async Task SerializeToStreamAsync(Stream stream, TransportContext? context)
             {
+                _logger.LogInformation(nameof(SerializeToStreamAsync));
                 _innerStream = await _inner.ReadAsStreamAsync().ConfigureAwait(false);
 
-                _innerStream = new PauseStream(_innerStream);
+                _innerStream = new PauseStream(_innerStream, _logger);
 
                 await _innerStream.CopyToAsync(stream).ConfigureAwait(false);
             }
@@ -237,6 +272,7 @@ public class DeadlineTests : FunctionalTestBase
 
             protected override void Dispose(bool disposing)
             {
+                _logger.LogInformation($"{nameof(Dispose)}: {disposing}");
                 if (disposing)
                 {
                     // This is important. Disposing original response content will cancel the gRPC call.
@@ -249,11 +285,13 @@ public class DeadlineTests : FunctionalTestBase
 
             private class PauseStream : Stream
             {
-                private Stream _stream;
+                private readonly Stream _stream;
+                private readonly ILogger _logger;
 
-                public PauseStream(Stream stream)
+                public PauseStream(Stream stream, ILogger logger)
                 {
                     _stream = stream;
+                    _logger = logger;
                 }
 
                 public override bool CanRead => _stream.CanRead;
@@ -293,10 +331,16 @@ public class DeadlineTests : FunctionalTestBase
 
                 public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
                 {
+                    //Debugger.Launch();
+
+                    _logger.LogInformation($"{nameof(ReadAsync)}: CanBeCanceled = {cancellationToken.CanBeCanceled}");
+
                     // Wait for call to be canceled.
                     var tcs = new TaskCompletionSource<object?>(TaskCreationOptions.RunContinuationsAsynchronously);
                     cancellationToken.Register(() => tcs.SetResult(null));
                     await tcs.Task;
+
+                    _logger.LogInformation($"{nameof(ReadAsync)}: After cancel");
 
                     // Wait a little longer to give time for HttpResponseMessage dispose to complete.
                     await Task.Delay(50);

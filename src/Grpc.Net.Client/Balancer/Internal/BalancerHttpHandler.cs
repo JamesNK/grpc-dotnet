@@ -1,4 +1,4 @@
-﻿#region Copyright notice and license
+#region Copyright notice and license
 
 // Copyright 2019 The gRPC Authors
 //
@@ -153,12 +153,12 @@ internal class BalancerHttpHandler : DelegatingHandler
             {
                 if (responseMessage.Content is not null)
                 {
-                    responseMessage.Content = new HttpContentWrapper(responseMessage.Content,
-                        () => result.SubchannelCallTracker.Complete(new CompletionContext { Address = address }));
+                    responseMessage.Content = new HttpContentWrapper(responseMessage.Content, cancellationToken,
+                        () => result.SubchannelCallTracker?.Complete(new CompletionContext { Address = address }));
                 }
                 else
                 {
-                    result.SubchannelCallTracker.Complete(new CompletionContext { Address = address });
+                    //result.SubchannelCallTracker.Complete(new CompletionContext { Address = address });
                 }
             }
 

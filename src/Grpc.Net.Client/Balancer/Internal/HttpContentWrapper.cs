@@ -1,17 +1,41 @@
+#region Copyright notice and license
+
+// Copyright 2019 The gRPC Authors
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+#endregion
+
 using System.Net;
+using Grpc.Shared;
 
 namespace Grpc.Net.Client.Balancer.Internal;
 
 internal sealed class HttpContentWrapper : HttpContent
 {
     private readonly HttpContent _inner;
+    private readonly CancellationToken _cancellationToken;
     private readonly Action _disposeAction;
+    private readonly MemoryStream _stream;
+    private Stream? _innerStream;
     private bool _disposed;
 
-    public HttpContentWrapper(HttpContent inner, Action disposeAction)
+    public HttpContentWrapper(HttpContent inner, CancellationToken cancellationToken, Action disposeAction)
     {
         _inner = inner;
+        _cancellationToken = cancellationToken;
         _disposeAction = disposeAction;
+        _stream = new MemoryStream();
 
         foreach (var kvp in inner.Headers)
         {
@@ -19,34 +43,42 @@ internal sealed class HttpContentWrapper : HttpContent
         }
     }
 
-#if NET5_0_OR_GREATER
-    protected override void SerializeToStream(Stream stream, TransportContext? context, CancellationToken cancellationToken)
+    protected override async Task<Stream> CreateContentReadStreamAsync()
     {
-        using var content = _inner.ReadAsStream(cancellationToken);
-        content.CopyTo(stream);
-    }
-
-    protected override async Task SerializeToStreamAsync(Stream stream, TransportContext? context, CancellationToken cancellationToken)
-    {
-        var content = await _inner.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
-        await using (content.ConfigureAwait(false))
+        if (_innerStream is null)
         {
-            await content.CopyToAsync(stream, cancellationToken).ConfigureAwait(false);
+            _innerStream = await _inner.ReadAsStreamAsync().ConfigureAwait(false);
+            _ = DrainStream();
         }
-    }
-#endif
 
-    protected override async Task SerializeToStreamAsync(Stream stream, TransportContext? context)
+        return _stream;
+    }
+
+    private async Task DrainStream()
     {
-        var content = await _inner.ReadAsStreamAsync().ConfigureAwait(false);
-#if NET5_0_OR_GREATER
-        await using (content.ConfigureAwait(false))
+        CompatibilityHelpers.Assert(_innerStream is not null);
+
+        try
+        {
+#if NETSTANDARD2_0
+            await _innerStream.CopyToAsync(_stream, 1024 * 8, _cancellationToken).ConfigureAwait(false);
 #else
-        using (content)
+            await _innerStream.CopyToAsync(_stream, _cancellationToken).ConfigureAwait(false);
 #endif
-        {
-            await content.CopyToAsync(stream).ConfigureAwait(false);
         }
+        catch
+        {
+            // Catch error to prevent it being thrown from unobserved task.
+        }
+        finally
+        {
+            Dispose(true);
+        }
+    }
+
+    protected override Task SerializeToStreamAsync(Stream stream, TransportContext? context)
+    {
+        throw new NotImplementedException();
     }
 
     protected override bool TryComputeLength(out long length)
@@ -63,6 +95,7 @@ internal sealed class HttpContentWrapper : HttpContent
         {
             _disposeAction();
             _inner.Dispose();
+            _stream.Dispose();
             _disposed = true;
         }
     }

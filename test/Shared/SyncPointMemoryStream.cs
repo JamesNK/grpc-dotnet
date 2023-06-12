@@ -1,4 +1,4 @@
-﻿#region Copyright notice and license
+#region Copyright notice and license
 
 // Copyright 2019 The gRPC Authors
 //
@@ -164,7 +164,7 @@ public class SyncPointMemoryStream : Stream
 
     public override bool CanWrite => false;
 
-    public override long Length => throw new NotImplementedException();
+    public override long Length => _currentData.Length;
 
     public override long Position { get; set; }
 

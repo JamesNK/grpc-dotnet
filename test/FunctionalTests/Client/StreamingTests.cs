@@ -1,4 +1,4 @@
-﻿#region Copyright notice and license
+#region Copyright notice and license
 
 // Copyright 2019 The gRPC Authors
 //
@@ -434,6 +434,39 @@ public class StreamingTests : FunctionalTestBase
     }
 
     [Test]
+    public async Task DuplexStreaming_PingPong_Success()
+    {
+        async Task UnaryDeadlineExceeded(IAsyncStreamReader<DataMessage> requestStream, IServerStreamWriter<DataMessage> responseStream, ServerCallContext context)
+        {
+            await foreach (var message in requestStream.ReadAllAsync())
+            {
+                await responseStream.WriteAsync(message);
+            }
+        }
+
+        // Arrange
+        var method = Fixture.DynamicGrpc.AddDuplexStreamingMethod<DataMessage, DataMessage>(UnaryDeadlineExceeded);
+
+        var channel = CreateChannel();
+
+        var client = TestClientFactory.Create(channel, method);
+
+        // Act
+        var call1 = client.DuplexStreamingCall();
+
+        await call1.RequestStream.WriteAsync(new DataMessage() { Data = ByteString.CopyFrom(new byte[1]) }).DefaultTimeout();
+
+        // Assert
+        Assert.IsTrue(await call1.ResponseStream.MoveNext().DefaultTimeout());
+
+        Assert.AreEqual(1, call1.ResponseStream.Current.Data.Length);
+
+        await call1.RequestStream.CompleteAsync().DefaultTimeout();
+
+        Assert.IsFalse(await call1.ResponseStream.MoveNext().DefaultTimeout());
+    }
+
+    [Test]
     public async Task DuplexStreaming_ParallelCallsFromOneChannel_Success()
     {
         async Task UnaryDeadlineExceeded(IAsyncStreamReader<DataMessage> requestStream, IServerStreamWriter<DataMessage> responseStream, ServerCallContext context)
@@ -726,7 +759,6 @@ public class StreamingTests : FunctionalTestBase
             {
                 return true;
             }
-
 
             return false;
         });
