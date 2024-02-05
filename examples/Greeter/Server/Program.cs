@@ -20,6 +20,7 @@ using Server;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddGrpc();
+builder.Logging.ClearProviders();
 
 var app = builder.Build();
 app.MapGrpcService<GreeterService>();

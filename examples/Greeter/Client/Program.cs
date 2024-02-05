@@ -16,14 +16,46 @@
 
 #endregion
 
+using System.Diagnostics;
 using Greet;
 using Grpc.Net.Client;
 
 using var channel = GrpcChannel.ForAddress("https://localhost:5001");
 var client = new Greeter.GreeterClient(channel);
 
-var reply = await client.SayHelloAsync(new HelloRequest { Name = "GreeterClient" });
-Console.WriteLine("Greeting: " + reply.Message);
+await client.SayHelloAsync(new HelloRequest { Name = "GreeterClient" });
+
+var stopwatch = Stopwatch.StartNew();
+
+var senders = new List<Task>();
+var times = new List<double>();
+
+for (int i = 0; i < 100; i++)
+{
+    senders.Add(Task.Run(async () =>
+    {
+        var list = new List<double>();
+        for (int i = 0; i < 10000; i++)
+        {
+            var start = Stopwatch.GetTimestamp();
+            await client.SayHelloAsync(new HelloRequest { Name = "GreeterClient" });
+            var total = Stopwatch.GetTimestamp() - start;
+            list.Add(total);
+        }
+        lock (times)
+        {
+            times.AddRange(list);
+        }
+    }));
+}
+
+await Task.WhenAll(senders);
+
+var average = times.Sum() / times.Count;
+
+stopwatch.Stop();
+Console.WriteLine($"Total time: {stopwatch.Elapsed.TotalSeconds} seconds");
+Console.WriteLine($"Average request time: {TimeSpan.FromTicks((long)average).TotalMilliseconds} ms");
 
 Console.WriteLine("Shutting down");
 Console.WriteLine("Press any key to exit...");
