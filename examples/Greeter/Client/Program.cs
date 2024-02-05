@@ -54,6 +54,7 @@ await Task.WhenAll(senders);
 var average = times.Sum() / times.Count;
 
 stopwatch.Stop();
+Console.WriteLine($"Requests sent: {times.Count}");
 Console.WriteLine($"Total time: {stopwatch.Elapsed.TotalSeconds} seconds");
 Console.WriteLine($"Average request time: {TimeSpan.FromTicks((long)average).TotalMilliseconds} ms");
 
