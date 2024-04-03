@@ -551,5 +551,111 @@ public class ResolverTests
         var balancer = (ChildHandlerLoadBalancer)channel.ConnectionManager._balancer!;
         return (T?)balancer._current?.LoadBalancer;
     }
+
+    [Test]
+    public async Task PickAsync_ErrorWhenInParallelWithUpdateChannelState()
+    {
+        // Arrange
+        var services = new ServiceCollection();
+
+        // add logger
+        services.AddNUnitLogger();
+        var loggerFactory = services.BuildServiceProvider().GetRequiredService<ILoggerFactory>();
+        var logger = loggerFactory.CreateLogger<ResolverTests>();
+
+        // add resolver and balancer
+        services.AddSingleton<ResolverFactory, CustomResolverFactory>();
+        services.AddSingleton<LoadBalancerFactory, CustomBalancerFactory>();
+
+        var connectionStep = 0;
+        services.AddSingleton<ISubchannelTransportFactory>(
+            new TestSubchannelTransportFactory((_, _) =>
+            {
+                // the first call should return `Ready` connection but then one of connections should be broken
+                // (as it happens in real life)
+                var connectivityState = connectionStep switch
+                {
+                    > 0 => Random.Shared.NextDouble() switch
+                        {
+                            // use 0.7 probability of broken connection just to make the bug occur sooner
+                            < 0.7 => ConnectivityState.TransientFailure,
+                            _ => ConnectivityState.Ready
+                        },
+                    _ => ConnectivityState.Ready
+                };
+
+                Interlocked.Increment(ref connectionStep);
+
+                return Task.FromResult(new TryConnectResult(connectivityState));
+            }));
+
+        var channelOptions = new GrpcChannelOptions
+        {
+            Credentials = ChannelCredentials.Insecure,
+            ServiceProvider = services.BuildServiceProvider(),
+        };
+
+        // Act & Assert
+        var channel = GrpcChannel.ForAddress("test:///test_addr", channelOptions);
+        await channel.ConnectionManager.ConnectAsync(waitForReady: false, CancellationToken.None);
+
+        // the point is to perform a lot of `picks` to catch `PickAsync()` and `UpdateChannelState()` simultaneous
+        // execution when ` _balancer.UpdateChannelState(state)` runs after `GetPickerAsync()` internals but before
+        // the task it returned completed
+        var pickAsyncTask = Task.Run(async () =>
+        {
+            var counter = 0;
+            var exceptionsCounter = 0;
+
+            while (counter < 1000)
+            {
+                // short delay
+                await Task.Delay(20);
+
+                try
+                {
+                    // I used counter to verify that exception is not always occurs at the first or the second
+                    // (or any other) predefined step
+                    counter++;
+
+                    var (subchannel, address, _) = await channel.ConnectionManager.PickAsync(
+                        new PickContext(),
+                        waitForReady: false,
+                        CancellationToken.None);
+
+                    logger.LogInformation(
+                        "[ {Counter} ] PickAsync result: subchannel = `{Subchannel}`, address = `{Address}`",
+                        counter,
+                        subchannel,
+                        address);
+                }
+                catch (Exception ex)
+                {
+                    logger.LogError(ex, "[ {Counter} ] PickAsync Error", counter);
+
+                    exceptionsCounter++;
+                    switch (exceptionsCounter)
+                    {
+                        // in real life renews are not too often so we stop renews here to show that this resolver
+                        // state is broken and will forever throw exceptions (at least until the next renew came)
+                        case 1:
+                            CustomResolver.StopRenew();
+                            break;
+
+                        // restart renew to show that renews to _different_ addresses can fix errors
+                        case > 5 and < 50:
+                            CustomResolver.RestartRenew();
+                            break;
+
+                        case > 50:
+                            throw;
+                    }
+                }
+            }
+        });
+
+        // in some time this will definitely fail
+        await pickAsyncTask;
+    }
 }
 #endif
