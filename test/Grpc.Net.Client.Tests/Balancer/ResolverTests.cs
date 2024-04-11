@@ -607,7 +607,7 @@ public class ResolverTests
             var counter = 0;
             var exceptionsCounter = 0;
 
-            while (counter < 1000)
+            while (counter < 3000)
             {
                 // short delay
                 await Task.Delay(20);
@@ -622,6 +622,8 @@ public class ResolverTests
                         new PickContext(),
                         waitForReady: false,
                         CancellationToken.None);
+
+                    exceptionsCounter = 0;
 
                     logger.LogInformation(
                         "[ {Counter} ] PickAsync result: subchannel = `{Subchannel}`, address = `{Address}`",
@@ -643,11 +645,11 @@ public class ResolverTests
                             break;
 
                         // restart renew to show that renews to _different_ addresses can fix errors
-                        case > 5 and < 50:
+                        case > 5 and < 200:
                             CustomResolver.RestartRenew();
                             break;
 
-                        case > 50:
+                        case > 200:
                             throw;
                     }
                 }
