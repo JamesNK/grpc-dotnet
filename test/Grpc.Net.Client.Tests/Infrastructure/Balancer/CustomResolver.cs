@@ -9,7 +9,7 @@ namespace Grpc.Tests.Shared;
 /// </summary>
 internal class CustomResolver(ILoggerFactory loggerFactory) : PollingResolver(loggerFactory)
 {
-    private const int AddressesUpdatePeriodMs = 500;
+    private const int AddressesUpdatePeriodMs = 5000;
 
     private static bool ShouldRenew = true;
 
