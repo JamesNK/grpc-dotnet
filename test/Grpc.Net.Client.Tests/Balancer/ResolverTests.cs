@@ -699,7 +699,7 @@ public class ResolverTests
 
         var connectionStep = 0;
         services.AddSingleton<ISubchannelTransportFactory>(
-            new TestSubchannelTransportFactory((_, _) =>
+            TestSubchannelTransportFactory.Create((_, _) =>
             {
                 // the first call should return `Ready` connection but then one of connections should be broken
                 // (as it happens in real life)
